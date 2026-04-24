@@ -1,0 +1,3 @@
+[submodule "agave"]
+	path = agave
+	url = https://github.com/anza-xyz/agave.git
