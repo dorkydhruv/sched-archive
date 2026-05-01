@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "pick-your-scheduler"
+name = "external-scheduler"
 version = "0.1.0"
