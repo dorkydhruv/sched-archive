@@ -1,11 +1,19 @@
 [package]
 name = "agave-external-scheduler"
 description = "External scheduler-bindings runner hosting pluggable pack strategies"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
 
 [dependencies]
-clap = {workspace = true, features = ["derive"]}
-agave-scheduler-bindings = {workspace = true}
+clap = { workspace = true, features = ["derive"] }
+agave-scheduler-bindings = {workspace = true, features = ["agave-unstable-api"] }
 serde ={ workspace = true, features = ["derive"]}
 serde_json ={ workspace = true}
 serde_with ={ workspace = true}
 tokio ={ workspace = true, features = ["macros", "rt", "signal"]}
+solana-pubkey ={ workspace = true}
+tracing = {workspace = true, features = ["log"]}
+tracing-subscriber = {workspace = true, features = ["fmt"]}
+agave-scheduling-utils ={ workspace = true}
+tokio-util = { workspace = true }

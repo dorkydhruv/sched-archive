@@ -11,9 +11,9 @@ pub(crate) struct Args {
     #[clap(long, value_hint = ValueHint::FilePath)]
     pub(crate) bindings_ipc: PathBuf,
     /// If provided, will write hourly log files to this directory.
-    #[arg(long, value_hint = ValueHint::DirPath)]
+    #[clap(long, value_hint = ValueHint::DirPath)]
     pub(crate) logs: Option<PathBuf>,
     /// Emit metrics via NATS.
-    #[arg(long)]
+    #[clap(long)]
     pub(crate) metrics: bool,
 }
