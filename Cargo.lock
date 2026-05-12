@@ -120,8 +120,10 @@ dependencies = [
  "slotmap",
  "solana-fee",
  "solana-pubkey 4.2.0",
+ "solana-transaction 4.1.1",
  "solana-transaction-error",
  "thiserror 2.0.18",
+ "wincode",
 ]
 
 [[package]]
@@ -2941,7 +2943,6 @@ dependencies = [
  "agave-scheduling-utils",
  "agave-transaction-view",
  "arrayref",
- "bincode",
  "borsh",
  "crossbeam-channel",
  "eyre",
@@ -2973,6 +2974,7 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tracing",
+ "wincode",
 ]
 
 [[package]]
@@ -3898,6 +3900,8 @@ checksum = "a634d1db65a393d4e87ec49ef97c8dfb12201e2ba9e5faf87ff34e632f29e509"
 dependencies = [
  "blake3",
  "lazy_static",
+ "serde",
+ "serde_derive",
  "solana-address 2.6.0",
  "solana-hash 4.3.0",
  "solana-instruction",
@@ -4687,6 +4691,8 @@ version = "4.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a98253cefd62dea714b67926d3d918c3b9f7d66993f1f2322ac7549ea991dc3e"
 dependencies = [
+ "serde",
+ "serde_derive",
  "solana-address 2.6.0",
  "solana-hash 4.3.0",
  "solana-instruction",

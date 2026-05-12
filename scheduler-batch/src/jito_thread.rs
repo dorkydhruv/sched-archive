@@ -20,11 +20,13 @@ use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_types::config::{CommitmentConfig, RpcAccountInfoConfig, UiAccountEncoding};
 use solana_rpc_client_types::response::UiAccount;
+use tokio_util::sync::CancellationToken;
 use tonic::service::Interceptor;
 use tonic::transport::{ClientTlsConfig, Endpoint};
 use tonic::{Request, Status};
 use tracing::{error, info};
 
+use crate::interval_stream::IntervalStream;
 use crate::tip_program::TIP_PAYMENT_CONFIG;
 
 #[derive(Debug, Clone)]
@@ -42,7 +44,7 @@ pub(crate) struct JitoThread {
 
 impl JitoThread {
     pub(crate) fn spawn(
-        shutdown: Shutdown,
+        shutdown: CancellationToken,
         update_tx: crossbeam_channel::Sender<JitoUpdate>,
         config: JitoArgs,
         keypair: Arc<Keypair>,

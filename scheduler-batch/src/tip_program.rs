@@ -72,7 +72,7 @@ pub(crate) fn init_tip_distribution(
         recent_blockhash,
     ));
 
-    (distribution_key, bincode::serialize(&tx).unwrap())
+    (distribution_key, wincode::serialize(&tx).unwrap())
 }
 
 pub(crate) struct ChangeTipReceiverArgs {
@@ -145,5 +145,5 @@ pub(crate) fn change_tip_receiver(
         recent_blockhash,
     ));
 
-    bincode::serialize(&tx).unwrap()
+    wincode::serialize(&tx).unwrap()
 }
