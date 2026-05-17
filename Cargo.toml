@@ -1,5 +1,5 @@
 [workspace]
-members = ["external-scheduler", "jito-protos", "scheduler-batch"]
+members = ["external-scheduler", "jito-protos", "scheduler-batch", "schedulers"]
 resolver = "2"
 
 [workspace.package]
@@ -28,12 +28,12 @@ incremental = false
 
 [workspace.dependencies]
 agave-feature-set = { git = "https://github.com/anza-xyz/agave" }
-agave-scheduler-batch.path = "./scheduler-batch"
+scheduler-batch.path = "./scheduler-batch"
 agave-scheduler-bindings = { git = "https://github.com/anza-xyz/agave" }
 # agave-scheduler-fifo.path = "./crates/scheduler-fifo"
 # agave-scheduler-greedy-revenue.path = "./crates/scheduler-greedy-revenue"
 # agave-scheduler-greedy-throughput.path = "./crates/scheduler-greedy-throughput"
-# agave-schedulers.path = "./crates/schedulers"
+schedulers.path = "./schedulers"
 agave-scheduling-utils = { git = "https://github.com/anza-xyz/agave" }
 agave-transaction-view = { git = "https://github.com/anza-xyz/agave" }
 arrayref = "0.3.9"

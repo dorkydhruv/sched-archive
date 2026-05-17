@@ -17,3 +17,8 @@ tracing = {workspace = true, features = ["log"]}
 tracing-subscriber = {workspace = true, features = ["fmt"]}
 agave-scheduling-utils ={ workspace = true}
 tokio-util = { workspace = true }
+schedulers = { workspace = true }
+scheduler-batch.workspace = true
+futures = { workspace = true, features = ["alloc"] }
+solana-keypair.workspace = true
+toml.workspace = true

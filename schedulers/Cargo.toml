@@ -1,0 +1,28 @@
+[package]
+name = "schedulers"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+agave-scheduling-utils = {workspace = true, features = ["agave-unstable-api", "dev-context-only-utils"]}
+chrono ={ workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_repr = { workspace = true}
+tracing = {workspace = true}
+serde_with = {workspace = true}
+solana-clock = { workspace = true }
+solana-signature ={ workspace = true}
+strum = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+wincode.workspace = true
+expect-test.workspace = true
+serde_json.workspace = true
+solana-compute-budget-interface.workspace = true
+solana-hash.workspace = true
+solana-keypair.workspace = true
+solana-message.workspace = true
+solana-system-transaction.workspace = true
+solana-transaction = { workspace = true, features = ["serde", "wincode"] }

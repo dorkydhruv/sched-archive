@@ -14,11 +14,11 @@ use agave_scheduler_bindings::worker_message_types::{
 use agave_scheduler_bindings::{
     LEADER_READY, MAX_TRANSACTIONS_PER_MESSAGE, SharableTransactionRegion, pack_message_flags,
 };
-use agave_schedulers::events::{
+use schedulers::events::{
     CheckFailure, Event, EventEmitter, EvictReason, SlotStatsEvent, TransactionAction,
     TransactionEvent, TransactionSource,
 };
-use agave_schedulers::shared::PriorityId;
+use schedulers::shared::PriorityId;
 use agave_scheduling_utils::bridge::{
     KeyedTransactionMeta, RuntimeState, ScheduleBatch, SchedulerBindingsBridge, TransactionKey,
     TxDecision, WorkerAction, WorkerResponse,
@@ -34,13 +34,13 @@ use solana_clock::{DEFAULT_SLOTS_PER_EPOCH, Slot};
 use solana_compute_budget_instruction::compute_budget_instruction_details;
 use solana_cost_model::block_cost_limits::MAX_BLOCK_UNITS_SIMD_0256;
 use solana_cost_model::cost_model::CostModel;
-use solana_fee_structure::FeeBudgetLimits;
 use solana_hash::Hash;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_runtime_transaction::runtime_transaction::RuntimeTransaction;
 use solana_svm_transaction::svm_message::SVMStaticMessage;
 use solana_transaction::sanitized::MessageHash;
+use static_assertions::const_assert;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -140,7 +140,7 @@ impl BatchScheduler {
         let JitoUpdate::BuilderConfig(builder_config) =
             jito_rx.recv_timeout(Duration::from_secs(5)).unwrap()
         else {
-            panic!();
+            panic!("the grpc request for builder config should be the first message sent by the jito thread");
         };
 
         // Ensure tip program is filtered.
@@ -1143,15 +1143,13 @@ impl BatchScheduler {
             .ok()?
             .sanitize_and_convert_to_compute_budget_limits(&runtime.feature_set)
             .ok()?;
-        let fee_budget_limits = FeeBudgetLimits::from(compute_budget_limits);
         let cost = CostModel::calculate_cost(&tx, &runtime.feature_set).sum();
 
         // Compute transaction reward.
         let fee_details = solana_fee::calculate_fee_details(
             &tx,
-            false,
             runtime.lamports_per_signature,
-            fee_budget_limits.prioritization_fee,
+            compute_budget_limits.get_prioritization_fee(),
             runtime.fee_features,
         );
         let burn = fee_details
@@ -1375,7 +1373,6 @@ mod tests {
     use solana_pubkey::Pubkey;
     use solana_transaction::versioned::VersionedTransaction;
     use solana_transaction::{Instruction, Transaction};
-    use toolbox::shutdown::Shutdown;
 
     use super::*;
 
@@ -1389,6 +1386,8 @@ mod tests {
         leader_range_end: 11,
         remaining_cost_units: 50_000_000,
         current_slot_progress: 25,
+        epoch: 0,
+        latest_blockhash: [0;32],
     };
 
     fn test_scheduler() -> (BatchScheduler, crossbeam_channel::Sender<JitoUpdate>) {
@@ -1419,7 +1418,7 @@ mod tests {
             checked_capacity: 64,
             bundle_capacity: 16,
         };
-        let scheduler = BatchScheduler::new_with_jito(Shutdown::new(), None, args, jito_rx);
+        let scheduler = BatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
 
         (scheduler, jito_tx)
     }
@@ -1603,7 +1602,7 @@ mod tests {
         let payer = Keypair::new();
         let tx = noop_with_budget(&payer, 25_000, 100);
         jito_tx
-            .send(JitoUpdate::Packet(bincode::serialize(&tx).unwrap()))
+            .send(JitoUpdate::Packet(wincode::serialize(&tx).unwrap()))
             .unwrap();
 
         // Poll to drain jito messages and schedule checks.
@@ -1635,7 +1634,7 @@ mod tests {
         )
         .into();
         jito_tx
-            .send(JitoUpdate::Packet(bincode::serialize(&tx).unwrap()))
+            .send(JitoUpdate::Packet(wincode::serialize(&tx).unwrap()))
             .unwrap();
 
         // Poll to drain jito messages.
@@ -1650,7 +1649,7 @@ mod tests {
     // Jito Bundles
 
     fn serialize_tx(tx: &VersionedTransaction) -> Vec<u8> {
-        bincode::serialize(tx).unwrap()
+        wincode::serialize(tx).unwrap()
     }
 
     #[test]
