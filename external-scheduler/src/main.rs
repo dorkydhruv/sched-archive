@@ -26,7 +26,6 @@ fn main() -> std::thread::Result<()> {
     let config = args.config.as_ref().map_or_else(
         || Config {
             host_name: "dev".to_string(),
-            nats_servers: vec![],
             filter_keys: HashSet::new(),
             scheduler: SchedulerConfig::GreedyThroughput,
         },

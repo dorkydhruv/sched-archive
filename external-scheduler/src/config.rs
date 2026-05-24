@@ -10,7 +10,6 @@ use solana_pubkey::Pubkey;
 #[derive(Debug, Deserialize)]
 pub(crate) struct Config {
     pub(crate) host_name: String,
-    pub(crate) nats_servers: Vec<String>,
     #[serde_as(as = "HashSet<serde_with::DisplayFromStr>")]
     pub(crate) filter_keys: HashSet<Pubkey>,
     pub(crate) scheduler: SchedulerConfig,
