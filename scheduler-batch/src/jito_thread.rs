@@ -71,7 +71,14 @@ impl JitoThread {
                 let fut = futures::future::select(
                     // NB: The first future is given priority which is what we want here.
                     Box::pin(shutdown.cancelled()),
-                    Box::pin(JitoThread { update_tx, endpoint, keypair }.run(rpc, &config.ws_rpc)),
+                    Box::pin(
+                        JitoThread {
+                            update_tx,
+                            endpoint,
+                            keypair,
+                        }
+                        .run(rpc, &config.ws_rpc),
+                    ),
                 );
 
                 rt.block_on(fut);
@@ -133,7 +140,9 @@ impl JitoThread {
         let block_engine = self.endpoint.connect().await?;
         let mut block_engine = BlockEngineValidatorClient::with_interceptor(
             block_engine,
-            AuthInterceptor { access: access.clone() },
+            AuthInterceptor {
+                access: access.clone(),
+            },
         );
 
         // Fetch block builder config (for now we don't refresh).
@@ -222,7 +231,10 @@ impl JitoThread {
         let block_builder = Pubkey::new_from_array(*arrayref::array_ref![&data, 40, 32]);
 
         self.update_tx
-            .try_send(JitoUpdate::TipConfig(TipConfig { tip_receiver, block_builder }))
+            .try_send(JitoUpdate::TipConfig(TipConfig {
+                tip_receiver,
+                block_builder,
+            }))
             .unwrap();
     }
 

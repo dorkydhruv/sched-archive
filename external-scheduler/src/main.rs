@@ -1,14 +1,18 @@
-use std::collections::HashSet;
-
 use clap::Parser;
+use std::error::Error;
+use tokio_util::sync::CancellationToken;
 use tracing::error;
 
-use crate::{config::{Config, SchedulerConfig}, scheduler_thread::SchedulerThread};
+use crate::config_store::ConfigStore;
+use crate::scheduler_thread::SchedulerThread;
+use crate::web_server::start_server;
 
 mod args;
-mod config;
+mod config_store;
 mod scheduler_thread;
-fn main() -> std::thread::Result<()> {
+mod web_server;
+
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let args = crate::args::Args::parse();
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
@@ -18,20 +22,88 @@ fn main() -> std::thread::Result<()> {
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         error!(?panic_info, "Application panic");
-
         default_panic(panic_info);
     }));
 
-    // Load config (or use default).
-    let config = args.config.as_ref().map_or_else(
-        || Config {
-            host_name: "dev".to_string(),
-            filter_keys: HashSet::new(),
-            scheduler: SchedulerConfig::GreedyThroughput,
-        },
-        |path| toml::from_str(&String::from_utf8(std::fs::read(path).unwrap_or_else(|_| panic!("failed to read the toml config file"))).unwrap()).unwrap(),
-    );
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
 
-    // Start server.
-    SchedulerThread::run_in_place(args, config)
+    let config_store = ConfigStore::from_file(&args.config)?;
+    let shutdown = CancellationToken::new();
+
+    runtime.block_on(async move {
+        let mut server = tokio::spawn(start_server(
+            config_store.clone(),
+            args.port,
+            shutdown.clone(),
+        ));
+        let mut scheduler = tokio::spawn(SchedulerThread::run(
+            args,
+            config_store.clone(),
+            shutdown.clone(),
+        ));
+
+        tokio::select! {
+            server_result = &mut server => {
+                shutdown.cancel();
+                scheduler.abort();
+
+                match server_result {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(error)) => Err(error),
+                    Err(join_error) => Err(join_error_to_error(join_error)),
+                }
+            },
+            scheduler_result = &mut scheduler => {
+                shutdown.cancel();
+                server.abort();
+
+                match scheduler_result {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(panic)) => panic_result_to_error(panic),
+                    Err(join_error) => Err(join_error_to_error(join_error)),
+                }
+            },
+            _ = wait_for_shutdown_signal() => {
+                shutdown.cancel();
+                server.abort();
+                scheduler.abort();
+
+                let _ = server.await;
+                let _ = scheduler.await;
+
+                Ok(())
+            },
+        }
+    })
+}
+
+async fn wait_for_shutdown_signal() {
+    let mut sigterm =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+    let mut sigint =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).unwrap();
+
+    tokio::select! {
+        _ = sigterm.recv() => (),
+        _ = sigint.recv() => (),
+    }
+}
+
+fn join_error_to_error(join_error: tokio::task::JoinError) -> Box<dyn Error + Send + Sync> {
+    Box::new(std::io::Error::other(join_error.to_string()))
+}
+
+fn panic_result_to_error(
+    panic: Box<dyn std::any::Any + Send>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if let Some(message) = panic.downcast_ref::<&str>() {
+        Err(Box::new(std::io::Error::other(*message)))
+    } else if let Some(message) = panic.downcast_ref::<String>() {
+        Err(Box::new(std::io::Error::other(message.clone())))
+    } else {
+        Err(Box::new(std::io::Error::other("task panicked")))
+    }
 }

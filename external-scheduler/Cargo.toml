@@ -11,7 +11,7 @@ agave-scheduler-bindings = {workspace = true, features = ["agave-unstable-api"] 
 serde ={ workspace = true, features = ["derive"]}
 serde_json ={ workspace = true}
 serde_with ={ workspace = true}
-tokio ={ workspace = true, features = ["macros", "rt", "signal"]}
+tokio ={ workspace = true, features = ["macros", "rt", "signal", "net"]}
 solana-pubkey ={ workspace = true}
 tracing = {workspace = true, features = ["log"]}
 tracing-subscriber = {workspace = true, features = ["fmt"]}
@@ -22,3 +22,5 @@ scheduler-batch.workspace = true
 futures = { workspace = true, features = ["alloc"] }
 solana-keypair.workspace = true
 toml.workspace = true
+axum = { version = "0.8", features = ["json", "form"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }

@@ -14,11 +14,6 @@ use agave_scheduler_bindings::worker_message_types::{
 use agave_scheduler_bindings::{
     LEADER_READY, MAX_TRANSACTIONS_PER_MESSAGE, SharableTransactionRegion, pack_message_flags,
 };
-use schedulers::events::{
-    CheckFailure, Event, EventEmitter, EvictReason, SlotStatsEvent, TransactionAction,
-    TransactionEvent, TransactionSource,
-};
-use schedulers::shared::PriorityId;
 use agave_scheduling_utils::bridge::{
     KeyedTransactionMeta, RuntimeState, ScheduleBatch, SchedulerBindingsBridge, TransactionKey,
     TxDecision, WorkerAction, WorkerResponse,
@@ -30,6 +25,11 @@ use crossbeam_channel::TryRecvError;
 use indexmap::IndexSet;
 use metrics::{Counter, Gauge, counter, gauge};
 use min_max_heap::MinMaxHeap;
+use schedulers::events::{
+    CheckFailure, Event, EventEmitter, EvictReason, SlotStatsEvent, TransactionAction,
+    TransactionEvent, TransactionSource,
+};
+use schedulers::shared::PriorityId;
 use solana_clock::{DEFAULT_SLOTS_PER_EPOCH, Slot};
 use solana_compute_budget_instruction::compute_budget_instruction_details;
 use solana_cost_model::block_cost_limits::MAX_BLOCK_UNITS_SIMD_0256;
@@ -60,11 +60,25 @@ const_assert!(TX_BATCH_SIZE < 4096);
 
 const CHECK_WORKER: usize = 0;
 const EXECUTE_WORKER_START: usize = 1;
-const MAX_CHECK_BATCHES: usize = 4;
-/// How many percentage points before the end should we aim to fill the block.
-const BLOCK_FILL_CUTOFF: u8 = 20;
-const PROGRESS_TIMEOUT: Duration = Duration::from_secs(5);
-const BUNDLE_EXPIRY: Duration = Duration::from_millis(200);
+
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    pub max_check_batches: usize,
+    pub block_fill_cutoff: u8,
+    pub progress_timeout: Duration,
+    pub bundle_expiry: Duration,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            max_check_batches: 4,
+            block_fill_cutoff: 20,
+            progress_timeout: Duration::from_secs(5),
+            bundle_expiry: Duration::from_millis(200),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct BatchSchedulerArgs {
@@ -75,6 +89,7 @@ pub struct BatchSchedulerArgs {
     pub unchecked_capacity: usize,
     pub checked_capacity: usize,
     pub bundle_capacity: usize,
+    pub runtime: RuntimeConfig,
 }
 
 pub struct BatchScheduler {
@@ -87,6 +102,7 @@ pub struct BatchScheduler {
     unchecked_capacity: usize,
     checked_capacity: usize,
     bundle_capacity: usize,
+    runtime: RuntimeConfig,
 
     builder_config: BuilderConfig,
     tip_config: Option<TipConfig>,
@@ -116,10 +132,17 @@ impl BatchScheduler {
         args: BatchSchedulerArgs,
     ) -> (Self, JoinHandle<()>) {
         let (jito_tx, jito_rx) = crossbeam_channel::bounded(1024);
-        let jito_thread =
-            JitoThread::spawn(shutdown.clone(), jito_tx, args.jito.clone(), args.keypair.clone());
+        let jito_thread = JitoThread::spawn(
+            shutdown.clone(),
+            jito_tx,
+            args.jito.clone(),
+            args.keypair.clone(),
+        );
 
-        (Self::new_with_jito(shutdown, events, args, jito_rx), jito_thread)
+        (
+            Self::new_with_jito(shutdown, events, args, jito_rx),
+            jito_thread,
+        )
     }
 
     #[must_use]
@@ -134,13 +157,16 @@ impl BatchScheduler {
             unchecked_capacity,
             checked_capacity,
             bundle_capacity,
+            runtime,
         }: BatchSchedulerArgs,
         jito_rx: crossbeam_channel::Receiver<JitoUpdate>,
     ) -> Self {
         let JitoUpdate::BuilderConfig(builder_config) =
             jito_rx.recv_timeout(Duration::from_secs(5)).unwrap()
         else {
-            panic!("the grpc request for builder config should be the first message sent by the jito thread");
+            panic!(
+                "the grpc request for builder config should be the first message sent by the jito thread"
+            );
         };
 
         // Ensure tip program is filtered.
@@ -156,6 +182,7 @@ impl BatchScheduler {
             unchecked_capacity,
             checked_capacity,
             bundle_capacity,
+            runtime,
 
             builder_config,
             tip_config: None,
@@ -176,6 +203,26 @@ impl BatchScheduler {
             slot_stats: SlotStatsEvent::default(),
             metrics: BatchMetrics::new(),
         }
+    }
+
+    /// Update runtime-tunable config values. Call this from the scheduler poll loop.
+    pub fn set_runtime_config(
+        &mut self,
+        unchecked_capacity: usize,
+        checked_capacity: usize,
+        bundle_capacity: usize,
+        block_fill_cutoff: u8,
+        max_check_batches: usize,
+        bundle_expiry: Duration,
+        progress_timeout: Duration,
+    ) {
+        self.unchecked_capacity = unchecked_capacity;
+        self.checked_capacity = checked_capacity;
+        self.bundle_capacity = bundle_capacity;
+        self.runtime.block_fill_cutoff = block_fill_cutoff;
+        self.runtime.max_check_batches = max_check_batches;
+        self.runtime.bundle_expiry = bundle_expiry;
+        self.runtime.progress_timeout = progress_timeout;
     }
 
     pub fn poll(&mut self, bridge: &mut SchedulerBindingsBridge<PriorityId>) {
@@ -242,7 +289,7 @@ impl BatchScheduler {
         match bridge.drain_progress() {
             Some(_) => self.last_progress_time = Instant::now(),
             None => assert!(
-                self.last_progress_time.elapsed() < PROGRESS_TIMEOUT,
+                self.last_progress_time.elapsed() < self.runtime.progress_timeout,
                 "Agave disconnected; elapsed={:?}; slot={}",
                 self.last_progress_time.elapsed(),
                 self.slot,
@@ -360,7 +407,11 @@ impl BatchScheduler {
                 worker: EXECUTE_WORKER_START,
                 transactions: &[KeyedTransactionMeta {
                     key: change_tip_receiver,
-                    meta: PriorityId { priority: BUNDLE_MARKER, cost: 0, key: change_tip_receiver },
+                    meta: PriorityId {
+                        priority: BUNDLE_MARKER,
+                        cost: 0,
+                        key: change_tip_receiver,
+                    },
                 }],
                 max_working_slot: self.slot + 4,
                 flags: pack_message_flags::EXECUTE | execution_flags::DROP_ON_FAILURE,
@@ -423,7 +474,9 @@ impl BatchScheduler {
                 bridge,
                 id.key,
                 id.priority,
-                TransactionAction::Evict { reason: EvictReason::UncheckedCapacity },
+                TransactionAction::Evict {
+                    reason: EvictReason::UncheckedCapacity,
+                },
             );
             bridge.drop_transaction(id.key);
         }
@@ -445,12 +498,19 @@ impl BatchScheduler {
                         return TxDecision::Drop;
                     }
 
-                    self.unchecked_tx.push(PriorityId { priority, cost, key });
+                    self.unchecked_tx.push(PriorityId {
+                        priority,
+                        cost,
+                        key,
+                    });
                     self.emit_tx_event(
                         bridge,
                         key,
                         priority,
-                        TransactionAction::Ingest { source: TransactionSource::Tpu, bundle: None },
+                        TransactionAction::Ingest {
+                            source: TransactionSource::Tpu,
+                            bundle: None,
+                        },
                     );
                     self.metrics.recv_tpu_ok.increment(1);
                     self.slot_stats.ingest_tpu_ok += 1;
@@ -504,19 +564,28 @@ impl BatchScheduler {
                         bridge,
                         id.key,
                         id.priority,
-                        TransactionAction::Evict { reason: EvictReason::UncheckedCapacity },
+                        TransactionAction::Evict {
+                            reason: EvictReason::UncheckedCapacity,
+                        },
                     );
                     bridge.drop_transaction(id.key);
                     self.metrics.recv_packet_evict.increment(1);
                 }
 
                 // Store the new packet.
-                self.unchecked_tx.push(PriorityId { priority, cost, key });
+                self.unchecked_tx.push(PriorityId {
+                    priority,
+                    cost,
+                    key,
+                });
                 self.emit_tx_event(
                     bridge,
                     key,
                     priority,
-                    TransactionAction::Ingest { source: TransactionSource::Jito, bundle: None },
+                    TransactionAction::Ingest {
+                        source: TransactionSource::Jito,
+                        bundle: None,
+                    },
                 );
                 self.metrics.recv_packet_ok.increment(1);
                 self.slot_stats.ingest_custom_ok += 1;
@@ -634,7 +703,7 @@ impl BatchScheduler {
         let expired: Vec<_> = self
             .bundles
             .iter()
-            .filter(|b| now.duration_since(b.received_at) > BUNDLE_EXPIRY)
+            .filter(|b| now.duration_since(b.received_at) > self.runtime.bundle_expiry)
             .cloned()
             // TODO: Need an ExtractIf to avoid this BS alloc.
             .collect();
@@ -651,13 +720,16 @@ impl BatchScheduler {
     fn schedule_checks(&mut self, bridge: &mut SchedulerBindingsBridge<PriorityId>) {
         // Loop until worker queue is filled or backlog is empty.
         let start_len = self.unchecked_tx.len();
-        while bridge.worker(CHECK_WORKER).len() < MAX_CHECK_BATCHES
+        while bridge.worker(CHECK_WORKER).len() < self.runtime.max_check_batches
             && bridge.worker(CHECK_WORKER).rem() > 0
         {
             let pop_next = || {
                 // Prioritize unchecked transactions.
                 if let Some(id) = self.unchecked_tx.pop_max() {
-                    return Some(KeyedTransactionMeta { key: id.key, meta: id });
+                    return Some(KeyedTransactionMeta {
+                        key: id.key,
+                        meta: id,
+                    });
                 }
 
                 // Re-check already checked transactions if we have remaining.
@@ -674,7 +746,10 @@ impl BatchScheduler {
                         continue;
                     }
 
-                    return Some(KeyedTransactionMeta { key: curr.key, meta: curr });
+                    return Some(KeyedTransactionMeta {
+                        key: curr.key,
+                        meta: curr,
+                    });
                 }
 
                 None
@@ -711,8 +786,10 @@ impl BatchScheduler {
 
     fn schedule_execute(&mut self, bridge: &mut SchedulerBindingsBridge<PriorityId>) {
         debug_assert_eq!(bridge.progress().leader_state, LEADER_READY);
-        let budget_percentage =
-            std::cmp::min(bridge.progress().current_slot_progress + BLOCK_FILL_CUTOFF, 100);
+        let budget_percentage = std::cmp::min(
+            bridge.progress().current_slot_progress + self.runtime.block_fill_cutoff,
+            100,
+        );
         // TODO: Would be ideal for the scheduler protocol to tell us the max block
         // units.
         let budget_limit = MAX_BLOCK_UNITS_SIMD_0256 * u64::from(budget_percentage) / 100;
@@ -759,7 +836,12 @@ impl BatchScheduler {
             // - Emit an event.
             for tx in &self.schedule_batch {
                 assert!(self.executing_tx.insert(tx.key));
-                self.emit_tx_event(bridge, tx.key, tx.meta.priority, TransactionAction::ExecuteReq);
+                self.emit_tx_event(
+                    bridge,
+                    tx.key,
+                    tx.meta.priority,
+                    TransactionAction::ExecuteReq,
+                );
             }
 
             // Update metrics.
@@ -821,8 +903,16 @@ impl BatchScheduler {
             resolve_flags::REQUESTED | resolve_flags::PERFORMED,
             "{rep:?}"
         );
-        assert_ne!(rep.status_check_flags & status_check_flags::REQUESTED, 0, "{rep:?}");
-        assert_ne!(rep.status_check_flags & status_check_flags::PERFORMED, 0, "{rep:?}");
+        assert_ne!(
+            rep.status_check_flags & status_check_flags::REQUESTED,
+            0,
+            "{rep:?}"
+        );
+        assert_ne!(
+            rep.status_check_flags & status_check_flags::PERFORMED,
+            0,
+            "{rep:?}"
+        );
 
         // If already in checked_tx, this is a recheck completing - nothing to do.
         if self.checked_tx.contains(&meta) {
@@ -852,7 +942,9 @@ impl BatchScheduler {
                 bridge,
                 id.key,
                 id.priority,
-                TransactionAction::Evict { reason: EvictReason::CheckedCapacity },
+                TransactionAction::Evict {
+                    reason: EvictReason::CheckedCapacity,
+                },
             );
             bridge.drop_transaction(id.key);
 
@@ -899,7 +991,9 @@ impl BatchScheduler {
                 self.slot_stats.execute_err += 1;
                 self.metrics.execute_err.increment(1);
 
-                TransactionAction::ExecuteErr { reason: u32::from(reason) }
+                TransactionAction::ExecuteErr {
+                    reason: u32::from(reason),
+                }
             }
         };
         self.emit_tx_event(bridge, meta.key, meta.priority, action);
@@ -928,7 +1022,9 @@ impl BatchScheduler {
                 bridge,
                 evicted.key,
                 evicted.priority,
-                TransactionAction::Evict { reason: EvictReason::CheckedCapacity },
+                TransactionAction::Evict {
+                    reason: EvictReason::CheckedCapacity,
+                },
             );
             bridge.drop_transaction(evicted.key);
             self.metrics.execute_evict.increment(1);
@@ -985,8 +1081,10 @@ impl BatchScheduler {
         Self::lock(&mut self.in_flight_locks, bridge, tx.key);
 
         // Build the 1TX batch.
-        self.schedule_batch
-            .push(KeyedTransactionMeta { key: tx.key, meta: *tx });
+        self.schedule_batch.push(KeyedTransactionMeta {
+            key: tx.key,
+            meta: *tx,
+        });
 
         // Schedule the batch.
         bridge
@@ -1387,7 +1485,7 @@ mod tests {
         remaining_cost_units: 50_000_000,
         current_slot_progress: 25,
         epoch: 0,
-        latest_blockhash: [0;32],
+        latest_blockhash: [0; 32],
     };
 
     fn test_scheduler() -> (BatchScheduler, crossbeam_channel::Sender<JitoUpdate>) {
@@ -1417,8 +1515,10 @@ mod tests {
             unchecked_capacity: 64,
             checked_capacity: 64,
             bundle_capacity: 16,
+            runtime: RuntimeConfig::default(),
         };
-        let scheduler = BatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
+        let scheduler =
+            BatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
 
         (scheduler, jito_tx)
     }
@@ -1473,7 +1573,10 @@ mod tests {
         scheduler.poll(&mut bridge);
 
         // Transition to leader.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
@@ -1519,7 +1622,10 @@ mod tests {
         assert_eq!(scheduler.bundles.len(), 1);
 
         // Transition to leader.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
@@ -1571,7 +1677,11 @@ mod tests {
             &[
                 ComputeBudgetInstruction::set_compute_unit_limit(25_000),
                 ComputeBudgetInstruction::set_compute_unit_price(100),
-                Instruction { program_id: TIP_PAYMENT_PROGRAM, accounts: vec![], data: vec![] },
+                Instruction {
+                    program_id: TIP_PAYMENT_PROGRAM,
+                    accounts: vec![],
+                    data: vec![],
+                },
             ],
             Some(&payer.pubkey()),
             &[&payer],
@@ -1626,7 +1736,11 @@ mod tests {
             &[
                 ComputeBudgetInstruction::set_compute_unit_limit(25_000),
                 ComputeBudgetInstruction::set_compute_unit_price(100),
-                Instruction { program_id: TIP_PAYMENT_PROGRAM, accounts: vec![], data: vec![] },
+                Instruction {
+                    program_id: TIP_PAYMENT_PROGRAM,
+                    accounts: vec![],
+                    data: vec![],
+                },
             ],
             Some(&payer.pubkey()),
             &[&payer],
@@ -1663,7 +1777,10 @@ mod tests {
         let tx_a = noop_with_budget(&payer_a, 25_000, 100);
         let tx_b = noop_with_budget(&payer_b, 25_000, 200);
         jito_tx
-            .send(JitoUpdate::Bundle(vec![serialize_tx(&tx_a), serialize_tx(&tx_b)]))
+            .send(JitoUpdate::Bundle(vec![
+                serialize_tx(&tx_a),
+                serialize_tx(&tx_b),
+            ]))
             .unwrap();
 
         // Poll to drain jito messages.
@@ -1692,7 +1809,11 @@ mod tests {
             &[
                 ComputeBudgetInstruction::set_compute_unit_limit(25_000),
                 ComputeBudgetInstruction::set_compute_unit_price(100),
-                Instruction { program_id: TIP_PAYMENT_PROGRAM, accounts: vec![], data: vec![] },
+                Instruction {
+                    program_id: TIP_PAYMENT_PROGRAM,
+                    accounts: vec![],
+                    data: vec![],
+                },
             ],
             Some(&payer_b.pubkey()),
             &[&payer_b],
@@ -1700,7 +1821,10 @@ mod tests {
         )
         .into();
         jito_tx
-            .send(JitoUpdate::Bundle(vec![serialize_tx(&tx_a), serialize_tx(&tx_b)]))
+            .send(JitoUpdate::Bundle(vec![
+                serialize_tx(&tx_a),
+                serialize_tx(&tx_b),
+            ]))
             .unwrap();
 
         // Poll to drain jito messages.
@@ -1779,7 +1903,10 @@ mod tests {
         scheduler.poll(&mut bridge);
 
         // Transition to leader - TX should be scheduled for execution.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
@@ -1792,7 +1919,10 @@ mod tests {
         let exec_batch = bridge.pop_schedule().unwrap();
         assert_eq!(exec_batch.flags, pack_message_flags::EXECUTE);
         assert_eq!(exec_batch.transactions.len(), 1);
-        assert_eq!(exec_batch.transactions[0].key, check_batch.transactions[0].key);
+        assert_eq!(
+            exec_batch.transactions[0].key,
+            check_batch.transactions[0].key
+        );
 
         // TX moved from checked to executing.
         assert_eq!(scheduler.checked_tx.len(), 0);
@@ -2033,7 +2163,10 @@ mod tests {
         scheduler.poll(&mut bridge);
 
         // Poll - Transition to leader.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
@@ -2191,7 +2324,10 @@ mod tests {
         scheduler.poll(&mut bridge);
 
         // Poll - Transition to leader.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Skip past the become-tip-receiver batches.
@@ -2294,7 +2430,10 @@ mod tests {
         assert_eq!(scheduler.bundles.len(), 1);
 
         // Transition to leader.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
@@ -2330,7 +2469,10 @@ mod tests {
         let tx_a = noop_with_budget(&payer_a, 25_000, 100);
         let tx_b = noop_with_budget(&payer_b, 25_000, 200);
         jito_tx
-            .send(JitoUpdate::Bundle(vec![serialize_tx(&tx_a), serialize_tx(&tx_b)]))
+            .send(JitoUpdate::Bundle(vec![
+                serialize_tx(&tx_a),
+                serialize_tx(&tx_b),
+            ]))
             .unwrap();
 
         // Provide tip config before becoming leader.
@@ -2345,7 +2487,10 @@ mod tests {
         assert_eq!(scheduler.bundles.len(), 1);
 
         // Transition to leader.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
@@ -2447,7 +2592,10 @@ mod tests {
         assert_eq!(scheduler.bundles.len(), 1);
 
         // Transition to leader.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
@@ -2548,7 +2696,10 @@ mod tests {
         assert_eq!(scheduler.bundles.len(), 1);
 
         // Transition to leader.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
@@ -2581,7 +2732,10 @@ mod tests {
         bridge.queue_execute_response(&exec_batch, 0, bridge.execute_ok());
 
         // Poll to drain the response.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // TX dropped from bridge, removed from executing, not in checked or deferred.
@@ -2627,7 +2781,10 @@ mod tests {
         );
 
         // Poll to drain the response.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // TX goes to deferred (not checked), will retry next slot.
@@ -2650,7 +2807,10 @@ mod tests {
         );
 
         // Poll to drain the response - TX moves to deferred.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
         assert!(scheduler.deferred_tx.iter().any(|id| id.key == tx_key));
 
@@ -2680,7 +2840,10 @@ mod tests {
         );
 
         // Poll to drain the response.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // TX dropped entirely.
@@ -2703,7 +2866,10 @@ mod tests {
         );
 
         // Poll to drain the response.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Bundle TX is dropped regardless of retryability.
@@ -2741,7 +2907,10 @@ mod tests {
         bridge.queue_unprocessed_response(&exec_batch, 0);
 
         // Poll to drain the response.
-        bridge.queue_progress(ProgressMessage { leader_state: LEADER_READY, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // Bundle TX is dropped (bundles are never retried).
@@ -2766,7 +2935,10 @@ mod tests {
                 block_builder: Pubkey::new_unique(),
             }))
             .unwrap();
-        bridge.queue_progress(ProgressMessage { current_slot: 1, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            current_slot: 1,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
         assert_eq!(bridge.pop_schedule(), None);
 
@@ -2807,7 +2979,10 @@ mod tests {
                 block_builder: Pubkey::new_unique(),
             }))
             .unwrap();
-        bridge.queue_progress(ProgressMessage { current_slot: 1, ..MOCK_PROGRESS });
+        bridge.queue_progress(ProgressMessage {
+            current_slot: 1,
+            ..MOCK_PROGRESS
+        });
         scheduler.poll(&mut bridge);
 
         // First LEADER_READY poll - tip TXs are scheduled.

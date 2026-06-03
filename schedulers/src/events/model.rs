@@ -42,14 +42,23 @@ pub struct TransactionEvent {
 #[derive(Debug, Serialize)]
 #[serde(tag = "action")]
 pub enum TransactionAction {
-    Ingest { source: TransactionSource, bundle: Option<Arc<String>> },
+    Ingest {
+        source: TransactionSource,
+        bundle: Option<Arc<String>>,
+    },
     CheckOk,
-    CheckErr { reason: CheckFailure },
+    CheckErr {
+        reason: CheckFailure,
+    },
     ExecuteReq,
     ExecuteOk,
-    ExecuteErr { reason: u32 },
+    ExecuteErr {
+        reason: u32,
+    },
     ExecuteUnprocessed,
-    Evict { reason: EvictReason },
+    Evict {
+        reason: EvictReason,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -108,8 +117,11 @@ mod tests {
 
     #[test]
     fn slot_start_event() {
-        let event =
-            StampedEvent { timestamp: DateTime::UNIX_EPOCH, slot: 100, event: Event::SlotStart };
+        let event = StampedEvent {
+            timestamp: DateTime::UNIX_EPOCH,
+            slot: 100,
+            event: Event::SlotStart,
+        };
         let event = serde_json::to_string_pretty(&event).unwrap();
 
         expect![[r#"
@@ -130,8 +142,11 @@ mod tests {
 
     #[test]
     fn leader_ready_event() {
-        let event =
-            StampedEvent { timestamp: DateTime::UNIX_EPOCH, slot: 105, event: Event::LeaderReady };
+        let event = StampedEvent {
+            timestamp: DateTime::UNIX_EPOCH,
+            slot: 105,
+            event: Event::LeaderReady,
+        };
         let event = serde_json::to_string_pretty(&event).unwrap();
 
         expect![[r#"
@@ -227,7 +242,10 @@ mod tests {
             signature: Signature::from([1; 64]),
             slot: 100,
             priority: 5000,
-            action: TransactionAction::Ingest { source: TransactionSource::Tpu, bundle: None },
+            action: TransactionAction::Ingest {
+                source: TransactionSource::Tpu,
+                bundle: None,
+            },
         });
 
         expect!["transaction"].assert_eq(EventDiscriminants::from(&event).into());
@@ -242,7 +260,10 @@ mod tests {
                 signature: Signature::from([1; 64]),
                 slot: 100,
                 priority: 5000,
-                action: TransactionAction::Ingest { source: TransactionSource::Tpu, bundle: None },
+                action: TransactionAction::Ingest {
+                    source: TransactionSource::Tpu,
+                    bundle: None,
+                },
             }),
         };
         let event = serde_json::to_string_pretty(&event).unwrap();
@@ -330,7 +351,9 @@ mod tests {
                 signature: Signature::from([1; 64]),
                 slot: 100,
                 priority: 5000,
-                action: TransactionAction::CheckErr { reason: CheckFailure::ParseOrSanitize },
+                action: TransactionAction::CheckErr {
+                    reason: CheckFailure::ParseOrSanitize,
+                },
             }),
         };
         let event = serde_json::to_string_pretty(&event).unwrap();
@@ -440,7 +463,9 @@ mod tests {
                 signature: Signature::from([1; 64]),
                 slot: 100,
                 priority: 5000,
-                action: TransactionAction::Evict { reason: EvictReason::CheckedCapacity },
+                action: TransactionAction::Evict {
+                    reason: EvictReason::CheckedCapacity,
+                },
             }),
         };
         let event = serde_json::to_string_pretty(&event).unwrap();

@@ -14,7 +14,10 @@ pub struct EventEmitter {
 
 impl EventEmitter {
     pub fn new(ctx: EventContext, tx: mpsc::Sender<StampedEvent>) -> Self {
-        EventEmitter { ctx: Arc::new(ctx), tx }
+        EventEmitter {
+            ctx: Arc::new(ctx),
+            tx,
+        }
     }
 
     #[must_use]
@@ -25,11 +28,16 @@ impl EventEmitter {
     pub fn emit(&self, event: Event) {
         let timestamp = chrono::Utc::now();
         let slot = self.ctx.slot.load(Ordering::Relaxed);
-        static TRTIGGERED : std::sync::Once = std::sync::Once::new();
+        static TRTIGGERED: std::sync::Once = std::sync::Once::new();
         if self
             .tx
-            .try_send(StampedEvent { timestamp, slot, event })
-            .is_err() && !TRTIGGERED.is_completed()
+            .try_send(StampedEvent {
+                timestamp,
+                slot,
+                event,
+            })
+            .is_err()
+            && !TRTIGGERED.is_completed()
         {
             TRTIGGERED.call_once(|| {
                 tracing::error!("Dropping events");
@@ -46,7 +54,9 @@ pub struct EventContext {
 impl EventContext {
     #[must_use]
     pub const fn new() -> Self {
-        Self { slot: AtomicU64::new(0) }
+        Self {
+            slot: AtomicU64::new(0),
+        }
     }
 
     pub fn set(&self, slot: Slot) {

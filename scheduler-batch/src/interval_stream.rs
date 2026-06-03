@@ -1,18 +1,24 @@
-use std::{pin::Pin, task::{Context, Poll}};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use futures::Stream;
 
-pub struct IntervalStream<Fut> 
-where Fut: Unpin
+pub struct IntervalStream<Fut>
+where
+    Fut: Unpin,
 {
     interval: tokio::time::Interval,
-    fut: Pin<Box<dyn Fn()-> Fut + Send>>,
+    fut: Pin<Box<dyn Fn() -> Fut + Send>>,
     in_progress: Option<Fut>,
 }
 
-impl <Fut, Output> IntervalStream<Fut>
-where Fut: Future<Output = Output> + Unpin{
-    pub fn new(interval: tokio::time::Interval, fut: Pin<Box<dyn Fn()-> Fut + Send>>) -> Self {
+impl<Fut, Output> IntervalStream<Fut>
+where
+    Fut: Future<Output = Output> + Unpin,
+{
+    pub fn new(interval: tokio::time::Interval, fut: Pin<Box<dyn Fn() -> Fut + Send>>) -> Self {
         Self {
             interval,
             fut,
@@ -21,8 +27,10 @@ where Fut: Future<Output = Output> + Unpin{
     }
 }
 
-impl <Fut, Output> Stream for IntervalStream<Fut>
-where Fut: Future<Output = Output> + Unpin{
+impl<Fut, Output> Stream for IntervalStream<Fut>
+where
+    Fut: Future<Output = Output> + Unpin,
+{
     type Item = Output;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

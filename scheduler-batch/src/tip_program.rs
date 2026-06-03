@@ -34,7 +34,11 @@ pub struct TipDistributionArgs {
 
 pub(crate) fn init_tip_distribution(
     keypair: &Keypair,
-    TipDistributionArgs { vote_account, merkle_authority, commission_bps }: TipDistributionArgs,
+    TipDistributionArgs {
+        vote_account,
+        merkle_authority,
+        commission_bps,
+    }: TipDistributionArgs,
     epoch: Epoch,
     recent_blockhash: Hash,
 ) -> (Pubkey, Vec<u8>) {
