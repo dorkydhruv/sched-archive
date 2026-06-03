@@ -1,435 +1,572 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Scheduler Config UI</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0f172a;
-            color: #e2e8f0;
-            min-height: 100vh;
-            padding: 2rem;
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        min-height: 100vh;
+        padding: 2rem;
+      }
+      h1 {
+        font-size: 1.75rem;
+        margin-bottom: 0.5rem;
+        color: #f8fafc;
+      }
+      .subtitle {
+        color: #94a3b8;
+        margin-bottom: 2rem;
+        font-size: 0.9rem;
+      }
+      .status-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        background: #1e293b;
+        border-radius: 0.5rem;
+        margin-bottom: 2rem;
+        font-size: 0.85rem;
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #22c55e;
+        animation: pulse 2s infinite;
+      }
+      .status-dot.error {
+        background: #ef4444;
+        animation: none;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
         }
-        h1 {
-            font-size: 1.75rem;
-            margin-bottom: 0.5rem;
-            color: #f8fafc;
+        50% {
+          opacity: 0.5;
         }
-        .subtitle {
-            color: #94a3b8;
-            margin-bottom: 2rem;
-            font-size: 0.9rem;
-        }
-        .status-bar {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.75rem 1rem;
-            background: #1e293b;
-            border-radius: 0.5rem;
-            margin-bottom: 2rem;
-            font-size: 0.85rem;
-        }
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #22c55e;
-            animation: pulse 2s infinite;
-        }
-        .status-dot.error { background: #ef4444; animation: none; }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-            gap: 1.5rem;
-        }
-        .card {
-            background: #1e293b;
-            border-radius: 0.75rem;
-            padding: 1.5rem;
-            border: 1px solid #334155;
-        }
-        .card h2 {
-            font-size: 1.1rem;
-            margin-bottom: 1.25rem;
-            color: #f1f5f9;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        .card h2 .icon {
-            font-size: 1.2rem;
-        }
-        .form-group {
-            margin-bottom: 1rem;
-        }
-        .form-group:last-child { margin-bottom: 0; }
-        label {
-            display: block;
-            font-size: 0.8rem;
-            color: #94a3b8;
-            margin-bottom: 0.35rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-        input, select {
-            width: 100%;
-            padding: 0.6rem 0.75rem;
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 0.5rem;
-            color: #e2e8f0;
-            font-size: 0.9rem;
-            transition: border-color 0.2s;
-        }
-        input:focus, select:focus {
-            outline: none;
-            border-color: #3b82f6;
-        }
-        input[type="number"] {
-            font-family: 'SF Mono', 'Fira Code', monospace;
-        }
-        .filter-keys-input {
-            font-size: 0.8rem;
-            min-height: 60px;
-        }
-        .btn-row {
-            display: flex;
-            gap: 0.75rem;
-            margin-top: 1.5rem;
-        }
-        button {
-            flex: 1;
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: 0.5rem;
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .btn-primary {
-            background: #3b82f6;
-            color: white;
-        }
-        .btn-primary:hover { background: #2563eb; }
-        .btn-secondary {
-            background: #334155;
-            color: #e2e8f0;
-        }
-        .btn-secondary:hover { background: #475569; }
-        .toast {
-            position: fixed;
-            bottom: 2rem;
-            right: 2rem;
-            padding: 1rem 1.5rem;
-            border-radius: 0.5rem;
-            font-size: 0.9rem;
-            font-weight: 500;
-            transform: translateY(100px);
-            opacity: 0;
-            transition: all 0.3s ease;
-            z-index: 1000;
-        }
-        .toast.show {
-            transform: translateY(0);
-            opacity: 1;
-        }
-        .toast.success { background: #065f46; color: #a7f3d0; }
-        .toast.error { background: #7f1d1d; color: #fca5a5; }
-        .toast.warning { background: #78350f; color: #fde68a; }
-        .scheduler-type-selector {
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-        }
-        .scheduler-type-btn {
-            flex: 1;
-            min-width: 120px;
-            padding: 0.6rem 1rem;
-            background: #0f172a;
-            border: 2px solid #334155;
-            border-radius: 0.5rem;
-            color: #94a3b8;
-            cursor: pointer;
-            text-align: center;
-            font-size: 0.85rem;
-            font-weight: 500;
-            transition: all 0.2s;
-        }
-        .scheduler-type-btn:hover { border-color: #475569; }
-        .scheduler-type-btn.active {
-            border-color: #3b82f6;
-            color: #3b82f6;
-            background: #1e3a5f;
-        }
-        .hidden { display: none; }
-        .restart-banner {
-            background: #78350f;
-            color: #fde68a;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1.5rem;
-            font-size: 0.9rem;
-            display: none;
-        }
-        .restart-banner.show { display: block; }
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: 1.5rem;
+      }
+      .card {
+        background: #1e293b;
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        border: 1px solid #334155;
+      }
+      .card h2 {
+        font-size: 1.1rem;
+        margin-bottom: 1.25rem;
+        color: #f1f5f9;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .card h2 .icon {
+        font-size: 1.2rem;
+      }
+      .form-group {
+        margin-bottom: 1rem;
+      }
+      .form-group:last-child {
+        margin-bottom: 0;
+      }
+      label {
+        display: block;
+        font-size: 0.8rem;
+        color: #94a3b8;
+        margin-bottom: 0.35rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      input,
+      select {
+        width: 100%;
+        padding: 0.6rem 0.75rem;
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 0.5rem;
+        color: #e2e8f0;
+        font-size: 0.9rem;
+        transition: border-color 0.2s;
+      }
+      input:focus,
+      select:focus {
+        outline: none;
+        border-color: #3b82f6;
+      }
+      input[type="number"] {
+        font-family: "SF Mono", "Fira Code", monospace;
+      }
+      .filter-keys-input {
+        font-size: 0.8rem;
+        min-height: 60px;
+      }
+      .btn-row {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+      }
+      button {
+        flex: 1;
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 0.5rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .btn-primary {
+        background: #3b82f6;
+        color: white;
+      }
+      .btn-primary:hover {
+        background: #2563eb;
+      }
+      .btn-secondary {
+        background: #334155;
+        color: #e2e8f0;
+      }
+      .btn-secondary:hover {
+        background: #475569;
+      }
+      .toast {
+        position: fixed;
+        bottom: 2rem;
+        right: 2rem;
+        padding: 1rem 1.5rem;
+        border-radius: 0.5rem;
+        font-size: 0.9rem;
+        font-weight: 500;
+        transform: translateY(100px);
+        opacity: 0;
+        transition: all 0.3s ease;
+        z-index: 1000;
+      }
+      .toast.show {
+        transform: translateY(0);
+        opacity: 1;
+      }
+      .toast.success {
+        background: #065f46;
+        color: #a7f3d0;
+      }
+      .toast.error {
+        background: #7f1d1d;
+        color: #fca5a5;
+      }
+      .toast.warning {
+        background: #78350f;
+        color: #fde68a;
+      }
+      .scheduler-type-selector {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .scheduler-type-btn {
+        flex: 1;
+        min-width: 120px;
+        padding: 0.6rem 1rem;
+        background: #0f172a;
+        border: 2px solid #334155;
+        border-radius: 0.5rem;
+        color: #94a3b8;
+        cursor: pointer;
+        text-align: center;
+        font-size: 0.85rem;
+        font-weight: 500;
+        transition: all 0.2s;
+      }
+      .scheduler-type-btn:hover {
+        border-color: #475569;
+      }
+      .scheduler-type-btn.active {
+        border-color: #3b82f6;
+        color: #3b82f6;
+        background: #1e3a5f;
+      }
+      .hidden {
+        display: none;
+      }
+      .restart-banner {
+        background: #78350f;
+        color: #fde68a;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
+        display: none;
+      }
+      .restart-banner.show {
+        display: block;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <h1>⚙️ Scheduler Config</h1>
     <p class="subtitle">Live configuration for the external scheduler</p>
 
     <div class="status-bar">
-        <div class="status-dot" id="statusDot"></div>
-        <span id="statusText">Connecting...</span>
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Connecting...</span>
     </div>
 
     <div class="restart-banner" id="restartBanner">
-        ⚠️ Scheduler type changed. Please restart the scheduler to apply the new scheduler type.
+      ⚠️ Scheduler type changed. Please restart the scheduler to apply the new
+      scheduler type.
     </div>
 
     <div class="grid">
-        <!-- General Settings -->
-        <div class="card">
-            <h2><span class="icon">🖥️</span> General</h2>
-            <div class="form-group">
-                <label for="hostName">Host Name</label>
-                <input type="text" id="hostName" placeholder="dev">
-            </div>
-            <div class="form-group">
-                <label for="schedulerType">Scheduler Type</label>
-                <div class="scheduler-type-selector">
-                    <button class="scheduler-type-btn" data-type="Batch">Batch</button>
-                    <button class="scheduler-type-btn" data-type="Fifo">FIFO</button>
-                    <button class="scheduler-type-btn" data-type="GreedyRevenue">Greedy Rev</button>
-                    <button class="scheduler-type-btn" data-type="GreedyThroughput">Greedy Through</button>
-                </div>
-            </div>
-            <div class="form-group">
-                <label for="filterKeys">Filter Keys (one per line)</label>
-                <textarea class="filter-keys-input" id="filterKeys" placeholder="Pubkeys to filter..."></textarea>
-            </div>
+      <!-- General Settings -->
+      <div class="card">
+        <h2><span class="icon">🖥️</span> General</h2>
+        <div class="form-group">
+          <label for="hostName">Host Name</label>
+          <input type="text" id="hostName" placeholder="dev" />
+        </div>
+        <div class="form-group">
+          <label for="schedulerType">Scheduler Type</label>
+          <div class="scheduler-type-selector">
+            <button class="scheduler-type-btn" data-type="Batch">Batch</button>
+            <button class="scheduler-type-btn" data-type="Fifo">FIFO</button>
+            <button class="scheduler-type-btn" data-type="GreedyRevenue">
+              Greedy Rev
+            </button>
+            <button class="scheduler-type-btn" data-type="GreedyThroughput">
+              Greedy Through
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="filterKeys">Filter Keys (one per line)</label>
+          <textarea
+            class="filter-keys-input"
+            id="filterKeys"
+            placeholder="Pubkeys to filter..."
+          ></textarea>
+        </div>
+      </div>
+
+      <!-- Batch Scheduler Config -->
+      <div class="card" id="batchCard">
+        <h2><span class="icon">📦</span> Batch Scheduler</h2>
+
+        <div class="form-group">
+          <label for="keypairPath">Keypair Path</label>
+          <input
+            type="text"
+            id="keypairPath"
+            placeholder="/path/to/keypair.json"
+          />
         </div>
 
-        <!-- Batch Scheduler Config -->
-        <div class="card" id="batchCard">
-            <h2><span class="icon">📦</span> Batch Scheduler</h2>
-            
-            <div class="form-group">
-                <label for="keypairPath">Keypair Path</label>
-                <input type="text" id="keypairPath" placeholder="/path/to/keypair.json">
-            </div>
-
-            <h3 style="margin: 1.25rem 0 0.75rem; font-size: 0.95rem; color: #cbd5e1;">Tip Distribution</h3>
-            <div class="form-group">
-                <label for="voteAccount">Vote Account</label>
-                <input type="text" id="voteAccount" placeholder="Pubkey...">
-            </div>
-            <div class="form-group">
-                <label for="merkleAuthority">Merkle Authority</label>
-                <input type="text" id="merkleAuthority" placeholder="Pubkey...">
-            </div>
-            <div class="form-group">
-                <label for="commissionBps">Commission BPS</label>
-                <input type="number" id="commissionBps" min="0" max="10000" placeholder="100">
-            </div>
-
-            <h3 style="margin: 1.25rem 0 0.75rem; font-size: 0.95rem; color: #cbd5e1;">Jito Config</h3>
-            <div class="form-group">
-                <label for="httpRpc">HTTP RPC</label>
-                <input type="text" id="httpRpc" placeholder="https://api.mainnet-beta.solana.com">
-            </div>
-            <div class="form-group">
-                <label for="wsRpc">WS RPC</label>
-                <input type="text" id="wsRpc" placeholder="wss://api.mainnet-beta.solana.com">
-            </div>
-            <div class="form-group">
-                <label for="blockEngine">Block Engine</label>
-                <input type="text" id="blockEngine" placeholder="https://mainnet.block-engine.jito.wtf">
-            </div>
-
-            <h3 style="margin: 1.25rem 0 0.75rem; font-size: 0.95rem; color: #cbd5e1;">Runtime Tuning</h3>
-            <div class="form-group">
-                <label for="uncheckedCapacity">Unchecked Capacity</label>
-                <input type="number" id="uncheckedCapacity" min="1024" placeholder="65536">
-            </div>
-            <div class="form-group">
-                <label for="checkedCapacity">Checked Capacity</label>
-                <input type="number" id="checkedCapacity" min="1024" placeholder="65536">
-            </div>
-            <div class="form-group">
-                <label for="bundleCapacity">Bundle Capacity</label>
-                <input type="number" id="bundleCapacity" min="1" placeholder="1024">
-            </div>
-            <div class="form-group">
-                <label for="blockFillCutoff">Block Fill Cutoff (%)</label>
-                <input type="number" id="blockFillCutoff" min="0" max="100" placeholder="20">
-            </div>
-            <div class="form-group">
-                <label for="maxCheckBatches">Max Check Batches</label>
-                <input type="number" id="maxCheckBatches" min="1" placeholder="4">
-            </div>
-            <div class="form-group">
-                <label for="bundleExpiryMs">Bundle Expiry (ms)</label>
-                <input type="number" id="bundleExpiryMs" min="1" placeholder="200">
-            </div>
-            <div class="form-group">
-                <label for="progressTimeoutSec">Progress Timeout (sec)</label>
-                <input type="number" id="progressTimeoutSec" min="1" placeholder="5">
-            </div>
+        <h3
+          style="margin: 1.25rem 0 0.75rem; font-size: 0.95rem; color: #cbd5e1"
+        >
+          Tip Distribution
+        </h3>
+        <div class="form-group">
+          <label for="voteAccount">Vote Account</label>
+          <input type="text" id="voteAccount" placeholder="Pubkey..." />
         </div>
+        <div class="form-group">
+          <label for="merkleAuthority">Merkle Authority</label>
+          <input type="text" id="merkleAuthority" placeholder="Pubkey..." />
+        </div>
+        <div class="form-group">
+          <label for="commissionBps">Commission BPS</label>
+          <input
+            type="number"
+            id="commissionBps"
+            min="0"
+            max="10000"
+            placeholder="100"
+          />
+        </div>
+
+        <h3
+          style="margin: 1.25rem 0 0.75rem; font-size: 0.95rem; color: #cbd5e1"
+        >
+          Jito Config
+        </h3>
+        <div class="form-group">
+          <label for="httpRpc">HTTP RPC</label>
+          <input
+            type="text"
+            id="httpRpc"
+            placeholder="https://api.mainnet-beta.solana.com"
+          />
+        </div>
+        <div class="form-group">
+          <label for="wsRpc">WS RPC</label>
+          <input
+            type="text"
+            id="wsRpc"
+            placeholder="wss://api.mainnet-beta.solana.com"
+          />
+        </div>
+        <div class="form-group">
+          <label for="blockEngine">Block Engine</label>
+          <input
+            type="text"
+            id="blockEngine"
+            placeholder="https://mainnet.block-engine.jito.wtf"
+          />
+        </div>
+
+        <h3
+          style="margin: 1.25rem 0 0.75rem; font-size: 0.95rem; color: #cbd5e1"
+        >
+          Runtime Tuning
+        </h3>
+        <div class="form-group">
+          <label for="uncheckedCapacity">Unchecked Capacity</label>
+          <input
+            type="number"
+            id="uncheckedCapacity"
+            min="1024"
+            placeholder="65536"
+          />
+        </div>
+        <div class="form-group">
+          <label for="checkedCapacity">Checked Capacity</label>
+          <input
+            type="number"
+            id="checkedCapacity"
+            min="1024"
+            placeholder="65536"
+          />
+        </div>
+        <div class="form-group">
+          <label for="bundleCapacity">Bundle Capacity</label>
+          <input type="number" id="bundleCapacity" min="1" placeholder="1024" />
+        </div>
+        <div class="form-group">
+          <label for="blockFillCutoff">Block Fill Cutoff (%)</label>
+          <input
+            type="number"
+            id="blockFillCutoff"
+            min="0"
+            max="100"
+            placeholder="20"
+          />
+        </div>
+        <div class="form-group">
+          <label for="maxCheckBatches">Max Check Batches</label>
+          <input type="number" id="maxCheckBatches" min="1" placeholder="4" />
+        </div>
+        <div class="form-group">
+          <label for="bundleExpiryMs">Bundle Expiry (ms)</label>
+          <input type="number" id="bundleExpiryMs" min="1" placeholder="200" />
+        </div>
+        <div class="form-group">
+          <label for="progressTimeoutSec">Progress Timeout (sec)</label>
+          <input
+            type="number"
+            id="progressTimeoutSec"
+            min="1"
+            placeholder="5"
+          />
+        </div>
+      </div>
     </div>
 
     <div class="btn-row">
-        <button class="btn-primary" onclick="saveConfig()">💾 Save Config</button>
-        <button class="btn-secondary" onclick="loadConfig()">🔄 Reload</button>
+      <button class="btn-primary" onclick="saveConfig()">💾 Save Config</button>
+      <button class="btn-secondary" onclick="loadConfig()">🔄 Reload</button>
     </div>
 
     <div class="toast" id="toast"></div>
 
     <script>
-        const API_BASE = 'http://127.0.0.1:3000';
-        let currentConfig = null;
+      const API_BASE = "http://127.0.0.1:3000";
+      let currentConfig = null;
 
-        // Scheduler type buttons
-        document.querySelectorAll('.scheduler-type-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.scheduler-type-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-            });
+      // Scheduler type buttons
+      document.querySelectorAll(".scheduler-type-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll(".scheduler-type-btn")
+            .forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
         });
+      });
 
-        async function loadConfig() {
-            try {
-                const res = await fetch(`${API_BASE}/config`);
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                currentConfig = await res.json();
-                populateForm(currentConfig);
-                setStatus('connected', 'Config loaded successfully');
-            } catch (err) {
-                setStatus('error', `Failed to load config: ${err.message}`);
-                showToast('Failed to load config', 'error');
-            }
+      async function loadConfig() {
+        try {
+          const res = await fetch(`${API_BASE}/config`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          currentConfig = await res.json();
+          populateForm(currentConfig);
+          setStatus("connected", "Config loaded successfully");
+        } catch (err) {
+          setStatus("error", `Failed to load config: ${err.message}`);
+          showToast("Failed to load config", "error");
+        }
+      }
+
+      function populateForm(config) {
+        document.getElementById("hostName").value = config.host_name || "";
+
+        const filterKeys = (config.filter_keys || []).join("\n");
+        document.getElementById("filterKeys").value = filterKeys;
+
+        const scheduler = config.scheduler;
+        if (scheduler) {
+          // Set scheduler type
+          document.querySelectorAll(".scheduler-type-btn").forEach((btn) => {
+            btn.classList.toggle("active", btn.dataset.type === scheduler.type);
+          });
+
+          if (scheduler.type === "Batch" && scheduler.batch) {
+            const b = scheduler.batch;
+            document.getElementById("keypairPath").value = b.keypair_path || "";
+            document.getElementById("voteAccount").value =
+              b.tip?.vote_account || "";
+            document.getElementById("merkleAuthority").value =
+              b.tip?.merkle_authority || "";
+            document.getElementById("commissionBps").value =
+              b.tip?.commission_bps ?? "";
+            document.getElementById("httpRpc").value = b.jito?.http_rpc || "";
+            document.getElementById("wsRpc").value = b.jito?.ws_rpc || "";
+            document.getElementById("blockEngine").value =
+              b.jito?.block_engine || "";
+            document.getElementById("uncheckedCapacity").value =
+              b.unchecked_capacity ?? "";
+            document.getElementById("checkedCapacity").value =
+              b.checked_capacity ?? "";
+            document.getElementById("bundleCapacity").value =
+              b.bundle_capacity ?? "";
+            document.getElementById("blockFillCutoff").value =
+              b.block_fill_cutoff ?? "";
+            document.getElementById("maxCheckBatches").value =
+              b.max_check_batches ?? "";
+            document.getElementById("bundleExpiryMs").value =
+              b.bundle_expiry_ms ?? "";
+            document.getElementById("progressTimeoutSec").value =
+              b.progress_timeout_sec ?? "";
+            document.getElementById("batchCard").classList.remove("hidden");
+          } else {
+            document.getElementById("batchCard").classList.add("hidden");
+          }
+        }
+      }
+
+      async function saveConfig() {
+        const activeType =
+          document.querySelector(".scheduler-type-btn.active")?.dataset.type ||
+          "Batch";
+
+        const payload = {
+          host_name: document.getElementById("hostName").value || undefined,
+          filter_keys:
+            document
+              .getElementById("filterKeys")
+              .value.split("\n")
+              .map((k) => k.trim())
+              .filter((k) => k.length > 0) || undefined,
+          scheduler: { [activeType]: {} },
+        };
+
+        if (activeType === "Batch") {
+          payload.scheduler.Batch = {
+            keypair_path:
+              document.getElementById("keypairPath").value || undefined,
+            tip: {
+              vote_account:
+                document.getElementById("voteAccount").value || undefined,
+              merkle_authority:
+                document.getElementById("merkleAuthority").value || undefined,
+              commission_bps:
+                parseInt(document.getElementById("commissionBps").value) ||
+                undefined,
+            },
+            jito: {
+              http_rpc: document.getElementById("httpRpc").value || undefined,
+              ws_rpc: document.getElementById("wsRpc").value || undefined,
+              block_engine:
+                document.getElementById("blockEngine").value || undefined,
+            },
+            unchecked_capacity:
+              parseInt(document.getElementById("uncheckedCapacity").value) ||
+              undefined,
+            checked_capacity:
+              parseInt(document.getElementById("checkedCapacity").value) ||
+              undefined,
+            bundle_capacity:
+              parseInt(document.getElementById("bundleCapacity").value) ||
+              undefined,
+            block_fill_cutoff:
+              parseInt(document.getElementById("blockFillCutoff").value) ||
+              undefined,
+            max_check_batches:
+              parseInt(document.getElementById("maxCheckBatches").value) ||
+              undefined,
+            bundle_expiry_ms:
+              parseInt(document.getElementById("bundleExpiryMs").value) ||
+              undefined,
+            progress_timeout_sec:
+              parseInt(document.getElementById("progressTimeoutSec").value) ||
+              undefined,
+          };
         }
 
-        function populateForm(config) {
-            document.getElementById('hostName').value = config.host_name || '';
-            
-            const filterKeys = (config.filter_keys || []).join('\n');
-            document.getElementById('filterKeys').value = filterKeys;
+        try {
+          const res = await fetch(`${API_BASE}/config`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
 
-            const scheduler = config.scheduler;
-            if (scheduler) {
-                // Set scheduler type
-                document.querySelectorAll('.scheduler-type-btn').forEach(btn => {
-                    btn.classList.toggle('active', btn.dataset.type === scheduler.type);
-                });
-
-                if (scheduler.type === 'Batch' && scheduler.batch) {
-                    const b = scheduler.batch;
-                    document.getElementById('keypairPath').value = b.keypair_path || '';
-                    document.getElementById('voteAccount').value = b.tip?.vote_account || '';
-                    document.getElementById('merkleAuthority').value = b.tip?.merkle_authority || '';
-                    document.getElementById('commissionBps').value = b.tip?.commission_bps ?? '';
-                    document.getElementById('httpRpc').value = b.jito?.http_rpc || '';
-                    document.getElementById('wsRpc').value = b.jito?.ws_rpc || '';
-                    document.getElementById('blockEngine').value = b.jito?.block_engine || '';
-                    document.getElementById('uncheckedCapacity').value = b.unchecked_capacity ?? '';
-                    document.getElementById('checkedCapacity').value = b.checked_capacity ?? '';
-                    document.getElementById('bundleCapacity').value = b.bundle_capacity ?? '';
-                    document.getElementById('blockFillCutoff').value = b.block_fill_cutoff ?? '';
-                    document.getElementById('maxCheckBatches').value = b.max_check_batches ?? '';
-                    document.getElementById('bundleExpiryMs').value = b.bundle_expiry_ms ?? '';
-                    document.getElementById('progressTimeoutSec').value = b.progress_timeout_sec ?? '';
-                    document.getElementById('batchCard').classList.remove('hidden');
-                } else {
-                    document.getElementById('batchCard').classList.add('hidden');
-                }
-            }
+          if (data.status === "scheduler_type_changed") {
+            document.getElementById("restartBanner").classList.add("show");
+            showToast("Scheduler type changed — restart required", "warning");
+          } else {
+            showToast("Config saved successfully", "success");
+          }
+          loadConfig();
+        } catch (err) {
+          showToast(`Failed to save: ${err.message}`, "error");
         }
+      }
 
-        async function saveConfig() {
-            const activeType = document.querySelector('.scheduler-type-btn.active')?.dataset.type || 'Batch';
-            
-            const payload = {
-                host_name: document.getElementById('hostName').value || undefined,
-                filter_keys: document.getElementById('filterKeys').value
-                    .split('\n')
-                    .map(k => k.trim())
-                    .filter(k => k.length > 0) || undefined,
-                scheduler: { [activeType]: {} }
-            };
+      function setStatus(type, message) {
+        const dot = document.getElementById("statusDot");
+        const text = document.getElementById("statusText");
+        dot.className = "status-dot" + (type === "error" ? " error" : "");
+        text.textContent = type === "connected" ? `✓ ${message}` : message;
+      }
 
-            if (activeType === 'Batch') {
-                payload.scheduler.Batch = {
-                    keypair_path: document.getElementById('keypairPath').value || undefined,
-                    tip: {
-                        vote_account: document.getElementById('voteAccount').value || undefined,
-                        merkle_authority: document.getElementById('merkleAuthority').value || undefined,
-                        commission_bps: parseInt(document.getElementById('commissionBps').value) || undefined,
-                    },
-                    jito: {
-                        http_rpc: document.getElementById('httpRpc').value || undefined,
-                        ws_rpc: document.getElementById('wsRpc').value || undefined,
-                        block_engine: document.getElementById('blockEngine').value || undefined,
-                    },
-                    unchecked_capacity: parseInt(document.getElementById('uncheckedCapacity').value) || undefined,
-                    checked_capacity: parseInt(document.getElementById('checkedCapacity').value) || undefined,
-                    bundle_capacity: parseInt(document.getElementById('bundleCapacity').value) || undefined,
-                    block_fill_cutoff: parseInt(document.getElementById('blockFillCutoff').value) || undefined,
-                    max_check_batches: parseInt(document.getElementById('maxCheckBatches').value) || undefined,
-                    bundle_expiry_ms: parseInt(document.getElementById('bundleExpiryMs').value) || undefined,
-                    progress_timeout_sec: parseInt(document.getElementById('progressTimeoutSec').value) || undefined,
-                };
-            }
+      function showToast(message, type = "success") {
+        const toast = document.getElementById("toast");
+        toast.textContent = message;
+        toast.className = `toast ${type} show`;
+        setTimeout(() => toast.classList.remove("show"), 3000);
+      }
 
-            try {
-                const res = await fetch(`${API_BASE}/config`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                
-                if (data.status === 'scheduler_type_changed') {
-                    document.getElementById('restartBanner').classList.add('show');
-                    showToast('Scheduler type changed — restart required', 'warning');
-                } else {
-                    showToast('Config saved successfully', 'success');
-                }
-                loadConfig();
-            } catch (err) {
-                showToast(`Failed to save: ${err.message}`, 'error');
-            }
-        }
+      // Load config on page load
+      loadConfig();
 
-        function setStatus(type, message) {
-            const dot = document.getElementById('statusDot');
-            const text = document.getElementById('statusText');
-            dot.className = 'status-dot' + (type === 'error' ? ' error' : '');
-            text.textContent = type === 'connected' ? `✓ ${message}` : message;
-        }
-
-        function showToast(message, type = 'success') {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.className = `toast ${type} show`;
-            setTimeout(() => toast.classList.remove('show'), 3000);
-        }
-
-        // Load config on page load
-        loadConfig();
-
-        // Auto-reload every 30s
-        setInterval(loadConfig, 30000);
+      // Auto-reload every 30s
+      setInterval(loadConfig, 30000);
     </script>
-</body>
+  </body>
 </html>
