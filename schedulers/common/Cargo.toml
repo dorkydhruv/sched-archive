@@ -2,7 +2,6 @@
 name = "schedulers"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 
 [dependencies]
 agave-scheduling-utils = {workspace = true, features = ["agave-unstable-api", "dev-context-only-utils"]}

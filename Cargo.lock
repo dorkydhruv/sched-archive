@@ -63,7 +63,7 @@ dependencies = [
  "axum 0.8.9",
  "clap",
  "futures",
- "scheduler-batch",
+ "jito-scheduler",
  "schedulers",
  "serde",
  "serde_json",
@@ -1965,6 +1965,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "jito-scheduler"
+version = "0.1.0"
+dependencies = [
+ "agave-scheduler-bindings",
+ "agave-scheduling-utils",
+ "agave-transaction-view",
+ "arrayref",
+ "borsh",
+ "crossbeam-channel",
+ "eyre",
+ "futures",
+ "indexmap 2.14.0",
+ "jito-protos",
+ "metrics",
+ "min-max-heap",
+ "schedulers",
+ "solana-clock",
+ "solana-compute-budget-instruction",
+ "solana-compute-budget-interface",
+ "solana-cost-model",
+ "solana-fee",
+ "solana-fee-structure",
+ "solana-hash 3.1.0",
+ "solana-keypair",
+ "solana-message 3.1.0",
+ "solana-packet 3.0.0",
+ "solana-pubkey 3.0.0",
+ "solana-pubsub-client",
+ "solana-rpc-client",
+ "solana-rpc-client-types",
+ "solana-runtime-transaction",
+ "solana-sdk-ids",
+ "solana-svm-transaction",
+ "solana-transaction 4.1.1",
+ "static_assertions",
+ "tokio",
+ "tokio-util",
+ "tonic",
+ "tracing",
+ "wincode",
+]
+
+[[package]]
 name = "jobserver"
 version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3033,49 +3076,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
 dependencies = [
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "scheduler-batch"
-version = "0.1.0"
-dependencies = [
- "agave-scheduler-bindings",
- "agave-scheduling-utils",
- "agave-transaction-view",
- "arrayref",
- "borsh",
- "crossbeam-channel",
- "eyre",
- "futures",
- "indexmap 2.14.0",
- "jito-protos",
- "metrics",
- "min-max-heap",
- "schedulers",
- "solana-clock",
- "solana-compute-budget-instruction",
- "solana-compute-budget-interface",
- "solana-cost-model",
- "solana-fee",
- "solana-fee-structure",
- "solana-hash 3.1.0",
- "solana-keypair",
- "solana-message 3.1.0",
- "solana-packet 3.0.0",
- "solana-pubkey 3.0.0",
- "solana-pubsub-client",
- "solana-rpc-client",
- "solana-rpc-client-types",
- "solana-runtime-transaction",
- "solana-sdk-ids",
- "solana-svm-transaction",
- "solana-transaction 4.1.1",
- "static_assertions",
- "tokio",
- "tokio-util",
- "tonic",
- "tracing",
- "wincode",
 ]
 
 [[package]]

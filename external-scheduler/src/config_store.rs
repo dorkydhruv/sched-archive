@@ -35,21 +35,21 @@ impl Default for ConfigData {
             host_name: "dev".to_string(),
             nats_servers: Vec::new(),
             filter_keys: HashSet::new(),
-            scheduler: SchedulerConfigData::Batch(BatchSchedulerConfigData::default()),
+            scheduler: SchedulerConfigData::JitoScheduler(JitoSchedulerConfigData::default()),
         }
     }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub enum SchedulerConfigData {
-    Batch(BatchSchedulerConfigData),
+    JitoScheduler(JitoSchedulerConfigData),
     Fifo,
     GreedyRevenue,
     GreedyThroughput,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct BatchSchedulerConfigData {
+pub struct JitoSchedulerConfigData {
     pub keypair_path: String,
     pub tip: TipDistributionConfigData,
     pub jito: JitoConfigData,
@@ -63,7 +63,7 @@ pub struct BatchSchedulerConfigData {
     pub progress_timeout_sec: u64,
 }
 
-impl Default for BatchSchedulerConfigData {
+impl Default for JitoSchedulerConfigData {
     fn default() -> Self {
         Self {
             keypair_path: String::new(),
@@ -166,11 +166,11 @@ struct FileConfigData {
 #[derive(Debug, serde::Deserialize)]
 struct FileSchedulerConfigData {
     #[serde(rename = "Batch")]
-    batch: FileBatchSchedulerConfigData,
+    batch: FileJitoSchedulerConfigData,
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct FileBatchSchedulerConfigData {
+struct FileJitoSchedulerConfigData {
     keypair_path: String,
     tip: TipDistributionConfigData,
     jito: JitoConfigData,
@@ -196,13 +196,13 @@ impl From<FileConfigData> for ConfigData {
             host_name: file_config.host_name,
             nats_servers: file_config.nats_servers,
             filter_keys: file_config.filter_keys,
-            scheduler: SchedulerConfigData::Batch(file_config.scheduler.batch.into()),
+            scheduler: SchedulerConfigData::JitoScheduler(file_config.scheduler.batch.into()),
         }
     }
 }
 
-impl From<FileBatchSchedulerConfigData> for BatchSchedulerConfigData {
-    fn from(file_config: FileBatchSchedulerConfigData) -> Self {
+impl From<FileJitoSchedulerConfigData> for JitoSchedulerConfigData {
+    fn from(file_config: FileJitoSchedulerConfigData) -> Self {
         Self {
             keypair_path: file_config.keypair_path,
             tip: file_config.tip,

@@ -104,28 +104,28 @@ async fn update_config(
 
 fn config_to_json(config: &ConfigData) -> serde_json::Value {
     let scheduler = match &config.scheduler {
-        crate::config_store::SchedulerConfigData::Batch(batch) => {
+        crate::config_store::SchedulerConfigData::JitoScheduler(jito) => {
             serde_json::json!({
-                "type": "Batch",
-                "batch": {
-                    "keypair_path": batch.keypair_path,
+                "type": "JitoScheduler",
+                "jito": {
+                    "keypair_path": jito.keypair_path,
                     "tip": {
-                        "vote_account": batch.tip.vote_account,
-                        "merkle_authority": batch.tip.merkle_authority,
-                        "commission_bps": batch.tip.commission_bps,
+                        "vote_account": jito.tip.vote_account,
+                        "merkle_authority": jito.tip.merkle_authority,
+                        "commission_bps": jito.tip.commission_bps,
                     },
                     "jito": {
-                        "http_rpc": batch.jito.http_rpc,
-                        "ws_rpc": batch.jito.ws_rpc,
-                        "block_engine": batch.jito.block_engine,
+                        "http_rpc": jito.jito.http_rpc,
+                        "ws_rpc": jito.jito.ws_rpc,
+                        "block_engine": jito.jito.block_engine,
                     },
-                    "unchecked_capacity": batch.unchecked_capacity,
-                    "checked_capacity": batch.checked_capacity,
-                    "bundle_capacity": batch.bundle_capacity,
-                    "block_fill_cutoff": batch.block_fill_cutoff,
-                    "max_check_batches": batch.max_check_batches,
-                    "bundle_expiry_ms": batch.bundle_expiry_ms,
-                    "progress_timeout_sec": batch.progress_timeout_sec,
+                    "unchecked_capacity": jito.unchecked_capacity,
+                    "checked_capacity": jito.checked_capacity,
+                    "bundle_capacity": jito.bundle_capacity,
+                    "block_fill_cutoff": jito.block_fill_cutoff,
+                    "max_check_batches": jito.max_check_batches,
+                    "bundle_expiry_ms": jito.bundle_expiry_ms,
+                    "progress_timeout_sec": jito.progress_timeout_sec,
                 }
             })
         }

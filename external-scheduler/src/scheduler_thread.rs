@@ -3,9 +3,9 @@ use crate::config_store::{ConfigStore, SchedulerConfigData};
 use agave_scheduling_utils::bridge::SchedulerBindingsBridge;
 use agave_scheduling_utils::handshake::{ClientLogon, client};
 use futures::{StreamExt, stream::FuturesUnordered};
-use scheduler_batch::jito_thread::JitoArgs;
-use scheduler_batch::scheduler::{BatchScheduler, BatchSchedulerArgs, RuntimeConfig};
-use scheduler_batch::tip_program::TipDistributionArgs;
+use jito_scheduler::jito_thread::JitoArgs;
+use jito_scheduler::scheduler::{JitoScheduler, JitoSchedulerArgs, RuntimeConfig};
+use jito_scheduler::tip_program::TipDistributionArgs;
 use schedulers::shared::PriorityId;
 use solana_keypair::{EncodableKey, Keypair};
 use solana_pubkey::Pubkey;
@@ -72,33 +72,33 @@ impl SchedulerThread {
         // Load initial config from store (synchronous, no block_on needed).
         let initial_config = config_store.read();
         match initial_config.scheduler {
-            SchedulerConfigData::Batch(batch) => {
-                let keypair = Arc::new(Keypair::read_from_file(&batch.keypair_path).unwrap());
-                let (scheduler, jito_thread) = BatchScheduler::new(
+            SchedulerConfigData::JitoScheduler(jito) => {
+                let keypair = Arc::new(Keypair::read_from_file(&jito.keypair_path).unwrap());
+                let (scheduler, jito_thread) = JitoScheduler::new(
                     shutdown.clone(),
                     events,
-                    BatchSchedulerArgs {
+                    JitoSchedulerArgs {
                         tip: TipDistributionArgs {
-                            vote_account: Pubkey::from_str(&batch.tip.vote_account).unwrap(),
-                            merkle_authority: Pubkey::from_str(&batch.tip.merkle_authority)
+                            vote_account: Pubkey::from_str(&jito.tip.vote_account).unwrap(),
+                            merkle_authority: Pubkey::from_str(&jito.tip.merkle_authority)
                                 .unwrap(),
-                            commission_bps: batch.tip.commission_bps,
+                            commission_bps: jito.tip.commission_bps,
                         },
                         jito: JitoArgs {
-                            http_rpc: batch.jito.http_rpc,
-                            ws_rpc: batch.jito.ws_rpc,
-                            block_engine: batch.jito.block_engine,
+                            http_rpc: jito.jito.http_rpc,
+                            ws_rpc: jito.jito.ws_rpc,
+                            block_engine: jito.jito.block_engine,
                         },
                         keypair,
                         filter_keys: initial_config.filter_keys,
-                        unchecked_capacity: batch.unchecked_capacity,
-                        checked_capacity: batch.checked_capacity,
-                        bundle_capacity: batch.bundle_capacity,
+                        unchecked_capacity: jito.unchecked_capacity,
+                        checked_capacity: jito.checked_capacity,
+                        bundle_capacity: jito.bundle_capacity,
                         runtime: RuntimeConfig {
-                            max_check_batches: batch.max_check_batches as usize,
-                            block_fill_cutoff: batch.block_fill_cutoff,
-                            progress_timeout: Duration::from_secs(batch.progress_timeout_sec),
-                            bundle_expiry: Duration::from_millis(batch.bundle_expiry_ms),
+                            max_check_batches: jito.max_check_batches as usize,
+                            block_fill_cutoff: jito.block_fill_cutoff,
+                            progress_timeout: Duration::from_secs(jito.progress_timeout_sec),
+                            bundle_expiry: Duration::from_millis(jito.bundle_expiry_ms),
                         },
                     },
                 );
@@ -215,7 +215,7 @@ where
     );
 }
 
-impl Scheduler for BatchScheduler {
+impl Scheduler for JitoScheduler {
     type Meta = PriorityId;
 
     fn poll(
@@ -226,15 +226,15 @@ impl Scheduler for BatchScheduler {
         // Read runtime config from the shared store each poll cycle (synchronous, no block_on needed)
         let runtime_config = config_store.read();
         // Apply runtime-tunable config updates to the scheduler
-        if let SchedulerConfigData::Batch(batch_config) = &runtime_config.scheduler {
+        if let SchedulerConfigData::JitoScheduler(jito_config) = &runtime_config.scheduler {
             self.set_runtime_config(
-                batch_config.unchecked_capacity,
-                batch_config.checked_capacity,
-                batch_config.bundle_capacity,
-                batch_config.block_fill_cutoff,
-                batch_config.max_check_batches as usize,
-                Duration::from_millis(batch_config.bundle_expiry_ms),
-                Duration::from_secs(batch_config.progress_timeout_sec),
+                jito_config.unchecked_capacity,
+                jito_config.checked_capacity,
+                jito_config.bundle_capacity,
+                jito_config.block_fill_cutoff,
+                jito_config.max_check_batches as usize,
+                Duration::from_millis(jito_config.bundle_expiry_ms),
+                Duration::from_secs(jito_config.progress_timeout_sec),
             );
         }
 

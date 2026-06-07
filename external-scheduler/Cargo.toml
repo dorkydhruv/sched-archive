@@ -3,7 +3,6 @@ name = "agave-external-scheduler"
 description = "External scheduler-bindings runner hosting pluggable pack strategies"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
@@ -18,7 +17,7 @@ tracing-subscriber = {workspace = true, features = ["fmt"]}
 agave-scheduling-utils ={ workspace = true}
 tokio-util = { workspace = true }
 schedulers = { workspace = true }
-scheduler-batch.workspace = true
+jito-scheduler.workspace = true
 futures = { workspace = true, features = ["alloc"] }
 solana-keypair.workspace = true
 toml.workspace = true

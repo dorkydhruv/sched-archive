@@ -1,11 +1,10 @@
 [workspace]
-members = ["external-scheduler", "jito-protos", "scheduler-batch", "schedulers"]
+members = ["external-scheduler", "jito-protos", "schedulers/jito-scheduler", "schedulers/common"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-authors = ["Dhruv Sharma"]
 
 [profile.release]
 opt-level = 3
@@ -28,12 +27,12 @@ incremental = false
 
 [workspace.dependencies]
 agave-feature-set = { git = "https://github.com/anza-xyz/agave" }
-scheduler-batch.path = "./scheduler-batch"
+jito-scheduler.path = "./schedulers/jito-scheduler"
 agave-scheduler-bindings = { git = "https://github.com/anza-xyz/agave" }
 # agave-scheduler-fifo.path = "./crates/scheduler-fifo"
 # agave-scheduler-greedy-revenue.path = "./crates/scheduler-greedy-revenue"
 # agave-scheduler-greedy-throughput.path = "./crates/scheduler-greedy-throughput"
-schedulers.path = "./schedulers"
+schedulers.path = "./schedulers/common"
 agave-scheduling-utils = { git = "https://github.com/anza-xyz/agave" }
 agave-transaction-view = { git = "https://github.com/anza-xyz/agave" }
 arrayref = "0.3.9"

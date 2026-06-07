@@ -81,7 +81,7 @@ impl Default for RuntimeConfig {
 }
 
 #[derive(Debug)]
-pub struct BatchSchedulerArgs {
+pub struct JitoSchedulerArgs {
     pub tip: TipDistributionArgs,
     pub jito: JitoArgs,
     pub keypair: Arc<Keypair>,
@@ -92,7 +92,7 @@ pub struct BatchSchedulerArgs {
     pub runtime: RuntimeConfig,
 }
 
-pub struct BatchScheduler {
+pub struct JitoScheduler {
     shutdown: CancellationToken,
     jito_rx: crossbeam_channel::Receiver<JitoUpdate>,
     tip_distribution_config: TipDistributionArgs,
@@ -124,12 +124,12 @@ pub struct BatchScheduler {
     metrics: BatchMetrics,
 }
 
-impl BatchScheduler {
+impl JitoScheduler {
     #[must_use]
     pub fn new(
         shutdown: CancellationToken,
         events: Option<EventEmitter>,
-        args: BatchSchedulerArgs,
+        args: JitoSchedulerArgs,
     ) -> (Self, JoinHandle<()>) {
         let (jito_tx, jito_rx) = crossbeam_channel::bounded(1024);
         let jito_thread = JitoThread::spawn(
@@ -149,7 +149,7 @@ impl BatchScheduler {
     fn new_with_jito(
         shutdown: CancellationToken,
         events: Option<EventEmitter>,
-        BatchSchedulerArgs {
+        JitoSchedulerArgs {
             tip,
             jito: _,
             keypair,
@@ -158,7 +158,7 @@ impl BatchScheduler {
             checked_capacity,
             bundle_capacity,
             runtime,
-        }: BatchSchedulerArgs,
+        }: JitoSchedulerArgs,
         jito_rx: crossbeam_channel::Receiver<JitoUpdate>,
     ) -> Self {
         let JitoUpdate::BuilderConfig(builder_config) =
@@ -1488,7 +1488,7 @@ mod tests {
         latest_blockhash: [0; 32],
     };
 
-    fn test_scheduler() -> (BatchScheduler, crossbeam_channel::Sender<JitoUpdate>) {
+    fn test_scheduler() -> (JitoScheduler, crossbeam_channel::Sender<JitoUpdate>) {
         let (jito_tx, jito_rx) = crossbeam_channel::bounded(1024);
 
         // Scheduler blocks until we give it an initial builder config.
@@ -1499,7 +1499,7 @@ mod tests {
             }))
             .unwrap();
 
-        let args = BatchSchedulerArgs {
+        let args = JitoSchedulerArgs {
             tip: TipDistributionArgs {
                 vote_account: Pubkey::new_unique(),
                 merkle_authority: Pubkey::new_unique(),
@@ -1518,7 +1518,7 @@ mod tests {
             runtime: RuntimeConfig::default(),
         };
         let scheduler =
-            BatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
+            JitoScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
 
         (scheduler, jito_tx)
     }
@@ -1537,7 +1537,7 @@ mod tests {
     }
 
     type SetupExecuting = (
-        BatchScheduler,
+        JitoScheduler,
         TestBridge<PriorityId>,
         crossbeam_channel::Sender<JitoUpdate>,
         ScheduleBatch<Vec<KeyedTransactionMeta<PriorityId>>>,

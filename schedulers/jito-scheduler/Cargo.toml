@@ -1,8 +1,7 @@
 [package]
-name = "scheduler-batch"
+name = "jito-scheduler"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 
 [dependencies]
 agave-scheduler-bindings.workspace = true
