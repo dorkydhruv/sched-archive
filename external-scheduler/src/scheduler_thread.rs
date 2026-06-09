@@ -6,13 +6,15 @@ use futures::{StreamExt, stream::FuturesUnordered};
 use jito_scheduler::jito_thread::JitoArgs;
 use jito_scheduler::scheduler::{JitoScheduler, JitoSchedulerArgs, RuntimeConfig};
 use jito_scheduler::tip_program::TipDistributionArgs;
-use schedulers::shared::PriorityId;
+use schedulers::PriorityId;
+use schedulers::events::{EventContext, EventEmitter};
 use solana_keypair::{EncodableKey, Keypair};
 use solana_pubkey::Pubkey;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle as StdJoinHandle;
 use std::{path::PathBuf, time::Duration};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle as TokioJoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -28,8 +30,8 @@ impl SchedulerThread {
         config_store: ConfigStore,
         shutdown: CancellationToken,
     ) -> std::thread::Result<()> {
-        let server = SchedulerThread::setup(args, config_store.clone(), shutdown).await;
-        server.await_shutdown(config_store).await
+        let server = SchedulerThread::setup(args, config_store, shutdown).await;
+        server.await_shutdown().await
     }
 
     async fn setup(args: Args, config_store: ConfigStore, shutdown: CancellationToken) -> Self {
@@ -37,37 +39,37 @@ impl SchedulerThread {
         let mut threads = Vec::default();
         // The events publisher is only spawned if NATS is configured, otherwise we just pass None to the schedulers.
         // We'll worry about this later when we setup the web interface
-        // let events = match config.nats_servers.is_empty() {
-        //     true => None,
-        //     false => {
-        //         let nats_client = Box::leak(Box::new(
-        //             metrics_nats_exporter::async_nats::connect(config.nats_servers)
-        //                  .await
-        //                  .expect("NATS Client Connect"),
-        //          ));
-        //         threads.push(
-        //             metrics_nats_exporter::install(
-        //                 shutdown.token.clone(),
-        //                 metrics_nats_exporter::Config {
-        //                     interval_min: Duration::from_millis(50),
-        //                     interval_max: Duration::from_millis(1000),
-        //                     metric_prefix: Some(format!("metric.scheduler.{}", config.host_name)),
-        //                  },
-        //                 nats_client,
-        //              )
-        //              .unwrap(),
-        //          );
+        let events = match config_store.read().logs_server.is_empty() {
+            true => None,
+            false => {
+                // let nats_client = Box::leak(Box::new(
+                //     metrics_nats_exporter::async_nats::connect(config.nats_servers)
+                //          .await
+                //          .expect("NATS Client Connect"),
+                //  ));
+                // threads.push(
+                //     metrics_nats_exporter::install(
+                //         shutdown.token.clone(),
+                //         metrics_nats_exporter::Config {
+                //             interval_min: Duration::from_millis(50),
+                //             interval_max: Duration::from_millis(1000),
+                //             metric_prefix: Some(format!("metric.scheduler.{}", config.host_name)),
+                //          },
+                //         nats_client,
+                //      )
+                //      .unwrap(),
+                //  );
 
-        //          // Spawn events publisher.
-        //         let event_ctx = EventContext::new();
-        //         let (event_tx, event_rx) = mpsc::channel(1024);
-        //         let events = EventEmitter::new(event_ctx, event_tx);
-        //         threads.push(EventsThread::spawn(event_rx, nats_client, &config.host_name));
+                // Spawn events publisher.
+                let event_ctx = EventContext::new();
+                // The event receiver should be used to generate the analysis over our web server backend
+                let (event_tx, _event_rx) = mpsc::channel(1024);
+                let events = EventEmitter::new(event_ctx, event_tx);
+                // threads.push(EventsThread::spawn(event_rx, nats_client, &config.host_name));
 
-        //         Some(events)
-        //      }
-        // };
-        let events = None;
+                Some(events)
+            }
+        };
 
         // Load initial config from store (synchronous, no block_on needed).
         let initial_config = config_store.read();
@@ -80,8 +82,7 @@ impl SchedulerThread {
                     JitoSchedulerArgs {
                         tip: TipDistributionArgs {
                             vote_account: Pubkey::from_str(&jito.tip.vote_account).unwrap(),
-                            merkle_authority: Pubkey::from_str(&jito.tip.merkle_authority)
-                                .unwrap(),
+                            merkle_authority: Pubkey::from_str(&jito.tip.merkle_authority).unwrap(),
                             commission_bps: jito.tip.commission_bps,
                         },
                         jito: JitoArgs {
@@ -131,7 +132,7 @@ impl SchedulerThread {
         SchedulerThread { shutdown, threads }
     }
 
-    async fn await_shutdown(mut self, _config_store: ConfigStore) -> std::thread::Result<()> {
+    async fn await_shutdown(mut self) -> std::thread::Result<()> {
         let mut exit = tokio::select! {
            () = self.shutdown.cancelled() => Ok(()),
 

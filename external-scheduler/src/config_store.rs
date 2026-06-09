@@ -24,7 +24,7 @@ impl Default for ConfigStore {
 pub struct ConfigData {
     pub host_name: String,
     #[serde(default)]
-    pub nats_servers: Vec<String>,
+    pub logs_server: Vec<String>,
     pub filter_keys: HashSet<Pubkey>,
     pub scheduler: SchedulerConfigData,
 }
@@ -33,7 +33,7 @@ impl Default for ConfigData {
     fn default() -> Self {
         Self {
             host_name: "dev".to_string(),
-            nats_servers: Vec::new(),
+            logs_server: Vec::new(),
             filter_keys: HashSet::new(),
             scheduler: SchedulerConfigData::JitoScheduler(JitoSchedulerConfigData::default()),
         }
@@ -157,7 +157,7 @@ pub struct ConfigUpdate {
 struct FileConfigData {
     host_name: String,
     #[serde(default)]
-    nats_servers: Vec<String>,
+    logs_server: Vec<String>,
     #[serde(default)]
     filter_keys: HashSet<Pubkey>,
     scheduler: FileSchedulerConfigData,
@@ -194,7 +194,7 @@ impl From<FileConfigData> for ConfigData {
     fn from(file_config: FileConfigData) -> Self {
         Self {
             host_name: file_config.host_name,
-            nats_servers: file_config.nats_servers,
+            logs_server: file_config.logs_server,
             filter_keys: file_config.filter_keys,
             scheduler: SchedulerConfigData::JitoScheduler(file_config.scheduler.batch.into()),
         }

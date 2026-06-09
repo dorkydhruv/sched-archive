@@ -25,21 +25,16 @@ use crossbeam_channel::TryRecvError;
 use indexmap::IndexSet;
 use metrics::{Counter, Gauge, counter, gauge};
 use min_max_heap::MinMaxHeap;
+use schedulers::PriorityId;
 use schedulers::events::{
     CheckFailure, Event, EventEmitter, EvictReason, SlotStatsEvent, TransactionAction,
     TransactionEvent, TransactionSource,
 };
-use schedulers::shared::PriorityId;
 use solana_clock::{DEFAULT_SLOTS_PER_EPOCH, Slot};
-use solana_compute_budget_instruction::compute_budget_instruction_details;
 use solana_cost_model::block_cost_limits::MAX_BLOCK_UNITS_SIMD_0256;
-use solana_cost_model::cost_model::CostModel;
 use solana_hash::Hash;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_runtime_transaction::runtime_transaction::RuntimeTransaction;
-use solana_svm_transaction::svm_message::SVMStaticMessage;
-use solana_transaction::sanitized::MessageHash;
 use static_assertions::const_assert;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -420,7 +415,7 @@ impl JitoScheduler {
     }
 
     fn drain_worker_responses(&mut self, bridge: &mut SchedulerBindingsBridge<PriorityId>) {
-        for worker in 0..5 {
+        for worker in 0..bridge.worker_count() {
             bridge.drain_worker(
                 worker,
                 |bridge, WorkerResponse { meta, response, .. }| {
@@ -484,7 +479,6 @@ impl JitoScheduler {
         self.slot_stats.ingest_tpu_evict += shortfall as u64;
 
         // TODO: Need to dedupe already seen transactions?
-
         bridge.drain_tpu(
             |bridge, key| match Self::calculate_priority(
                 bridge.runtime(),
@@ -610,6 +604,7 @@ impl JitoScheduler {
 
         for packet in bundle {
             let Ok(key) = bridge.insert_transaction(&packet) else {
+                // drop the entire bundle if any transaction fails to insert
                 for key in keys {
                     bridge.drop_transaction(key);
                 }
@@ -622,9 +617,11 @@ impl JitoScheduler {
             keys.push(key);
 
             // Calculate cost and reward for this transaction.
-            let Some((cost, reward)) =
-                Self::calculate_cost_and_reward(bridge.runtime(), &bridge.transaction(key).data)
-            else {
+            let Some((cost, reward)) = schedulers::calculate_cost_and_reward(
+                bridge.runtime(),
+                &bridge.transaction(key).data,
+            ) else {
+                // drop the entire bundle if any transaction fails to insert
                 for key in keys {
                     bridge.drop_transaction(key);
                 }
@@ -702,10 +699,9 @@ impl JitoScheduler {
         // Retain only non-expired bundles, dropping expired ones.
         let expired: Vec<_> = self
             .bundles
-            .iter()
-            .filter(|b| now.duration_since(b.received_at) > self.runtime.bundle_expiry)
-            .cloned()
-            // TODO: Need an ExtractIf to avoid this BS alloc.
+            .extract_if(.., |b| {
+                now.duration_since(b.received_at) > self.runtime.bundle_expiry
+            })
             .collect();
 
         for bundle in expired {
@@ -1212,7 +1208,7 @@ impl JitoScheduler {
     ) {
         for (addr, writable) in bridge.transaction(tx_key).locks() {
             let Entry::Occupied(mut entry) = in_flight_locks.entry(*addr) else {
-                panic!();
+                panic!("Attempting to unlock an account with no lockers");
             };
             entry.get_mut().remove(tx_key, writable);
             if entry.get().is_empty() {
@@ -1221,50 +1217,11 @@ impl JitoScheduler {
         }
     }
 
-    fn calculate_cost_and_reward(
-        runtime: &RuntimeState,
-        tx: &SanitizedTransactionView<TransactionPtr>,
-    ) -> Option<(u64, u64)> {
-        // Construct runtime transaction.
-        let tx = RuntimeTransaction::<&SanitizedTransactionView<TransactionPtr>>::try_new(
-            tx,
-            MessageHash::Compute,
-            None,
-        )
-        .ok()?;
-
-        // Compute transaction cost.
-        let compute_budget_limits =
-            compute_budget_instruction_details::ComputeBudgetInstructionDetails::try_from(
-                tx.program_instructions_iter(),
-            )
-            .ok()?
-            .sanitize_and_convert_to_compute_budget_limits(&runtime.feature_set)
-            .ok()?;
-        let cost = CostModel::calculate_cost(&tx, &runtime.feature_set).sum();
-
-        // Compute transaction reward.
-        let fee_details = solana_fee::calculate_fee_details(
-            &tx,
-            runtime.lamports_per_signature,
-            compute_budget_limits.get_prioritization_fee(),
-            runtime.fee_features,
-        );
-        let burn = fee_details
-            .transaction_fee()
-            .checked_mul(runtime.burn_percent)?
-            / 100;
-        let base_fee = fee_details.transaction_fee() - burn;
-        let reward = base_fee.saturating_add(fee_details.prioritization_fee());
-
-        Some((cost, reward))
-    }
-
     fn calculate_priority(
         runtime: &RuntimeState,
         tx: &SanitizedTransactionView<TransactionPtr>,
     ) -> Option<(u64, u64)> {
-        let (cost, reward) = Self::calculate_cost_and_reward(runtime, tx)?;
+        let (cost, reward) = schedulers::calculate_cost_and_reward(runtime, tx)?;
         let priority = reward
             .saturating_mul(PRIORITY_MULTIPLIER)
             .saturating_div(cost.saturating_add(1));
@@ -1517,8 +1474,7 @@ mod tests {
             bundle_capacity: 16,
             runtime: RuntimeConfig::default(),
         };
-        let scheduler =
-            JitoScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
+        let scheduler = JitoScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
 
         (scheduler, jito_tx)
     }

@@ -5,7 +5,7 @@ use tracing::error;
 
 use crate::config_store::ConfigStore;
 use crate::scheduler_thread::SchedulerThread;
-use crate::web_server::start_server;
+// use crate::web_server::start_server;
 
 mod args;
 mod config_store;
@@ -34,47 +34,49 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let shutdown = CancellationToken::new();
 
     runtime.block_on(async move {
-        let mut server = tokio::spawn(start_server(
-            config_store.clone(),
-            args.port,
-            shutdown.clone(),
-        ));
+        // let mut server = tokio::spawn(start_server(
+        //     config_store.clone(),
+        //     args.port,
+        //     shutdown.clone(),
+        // ));
         let mut scheduler = tokio::spawn(SchedulerThread::run(
             args,
             config_store.clone(),
             shutdown.clone(),
         ));
 
+        // Select between either of the tasks or an interrupt
         tokio::select! {
-            server_result = &mut server => {
+            _ = wait_for_shutdown_signal() => {
                 shutdown.cancel();
+                // server.abort();
                 scheduler.abort();
 
-                match server_result {
-                    Ok(Ok(())) => Ok(()),
-                    Ok(Err(error)) => Err(error),
-                    Err(join_error) => Err(join_error_to_error(join_error)),
-                }
+                // let _ = server.await;
+                let _ = scheduler.await;
+
+                Ok(())
             },
+            // we'll get to the serve later for now.
+            // server_result = &mut server => {
+            //     shutdown.cancel();
+            //     scheduler.abort();
+
+            //     match server_result {
+            //         Ok(Ok(())) => Ok(()),
+            //         Ok(Err(error)) => Err(error),
+            //         Err(join_error) => Err(join_error_to_error(join_error)),
+            //     }
+            // },
             scheduler_result = &mut scheduler => {
                 shutdown.cancel();
-                server.abort();
+                // server.abort();
 
                 match scheduler_result {
                     Ok(Ok(())) => Ok(()),
                     Ok(Err(panic)) => panic_result_to_error(panic),
                     Err(join_error) => Err(join_error_to_error(join_error)),
                 }
-            },
-            _ = wait_for_shutdown_signal() => {
-                shutdown.cancel();
-                server.abort();
-                scheduler.abort();
-
-                let _ = server.await;
-                let _ = scheduler.await;
-
-                Ok(())
             },
         }
     })

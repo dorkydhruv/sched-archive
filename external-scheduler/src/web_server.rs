@@ -104,6 +104,7 @@ async fn update_config(
 
 fn config_to_json(config: &ConfigData) -> serde_json::Value {
     let scheduler = match &config.scheduler {
+        // preferably have serde::Serialize derive on the config structs, but doing manually for now to have more control over the output format
         crate::config_store::SchedulerConfigData::JitoScheduler(jito) => {
             serde_json::json!({
                 "type": "JitoScheduler",
@@ -142,7 +143,7 @@ fn config_to_json(config: &ConfigData) -> serde_json::Value {
 
     serde_json::json!({
         "host_name": config.host_name,
-        "nats_servers": config.nats_servers,
+        "logs_server": config.logs_server,
         "filter_keys": config.filter_keys.iter().map(|k| k.to_string()).collect::<Vec<_>>(),
         "scheduler": scheduler,
     })

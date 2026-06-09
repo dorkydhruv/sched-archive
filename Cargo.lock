@@ -3083,6 +3083,7 @@ name = "schedulers"
 version = "0.1.0"
 dependencies = [
  "agave-scheduling-utils",
+ "agave-transaction-view",
  "chrono",
  "expect-test",
  "serde",
@@ -3090,10 +3091,14 @@ dependencies = [
  "serde_repr",
  "serde_with",
  "solana-clock",
+ "solana-compute-budget-instruction",
  "solana-compute-budget-interface",
+ "solana-cost-model",
+ "solana-fee",
  "solana-hash 3.1.0",
  "solana-keypair",
  "solana-message 3.1.0",
+ "solana-runtime-transaction",
  "solana-signature",
  "solana-system-transaction",
  "solana-transaction 4.1.1",
