@@ -30,6 +30,11 @@ use schedulers::events::{
     CheckFailure, Event, EventEmitter, EvictReason, SlotStatsEvent, TransactionAction,
     TransactionEvent, TransactionSource,
 };
+use schedulers::jito::jito_thread::{BuilderConfig, JitoArgs, JitoThread, JitoUpdate, TipConfig};
+use schedulers::jito::tip_program::{
+    ChangeTipReceiverArgs, TIP_ACCOUNTS, TIP_PAYMENT_PROGRAM, TipDistributionArgs,
+    change_tip_receiver, init_tip_distribution,
+};
 use solana_clock::{DEFAULT_SLOTS_PER_EPOCH, Slot};
 use solana_cost_model::block_cost_limits::MAX_BLOCK_UNITS_SIMD_0256;
 use solana_hash::Hash;
@@ -38,12 +43,6 @@ use solana_pubkey::Pubkey;
 use static_assertions::const_assert;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
-
-use crate::jito_thread::{BuilderConfig, JitoArgs, JitoThread, JitoUpdate, TipConfig};
-use crate::tip_program::{
-    ChangeTipReceiverArgs, TIP_ACCOUNTS, TIP_PAYMENT_PROGRAM, TipDistributionArgs,
-    change_tip_receiver, init_tip_distribution,
-};
 
 const PRIORITY_MULTIPLIER: u64 = 1_000_000;
 const BUNDLE_MARKER: u64 = u64::MAX;
@@ -76,7 +75,7 @@ impl Default for RuntimeConfig {
 }
 
 #[derive(Debug)]
-pub struct JitoSchedulerArgs {
+pub struct BatchSchedulerArgs {
     pub tip: TipDistributionArgs,
     pub jito: JitoArgs,
     pub keypair: Arc<Keypair>,
@@ -87,7 +86,7 @@ pub struct JitoSchedulerArgs {
     pub runtime: RuntimeConfig,
 }
 
-pub struct JitoScheduler {
+pub struct BatchScheduler {
     shutdown: CancellationToken,
     jito_rx: crossbeam_channel::Receiver<JitoUpdate>,
     tip_distribution_config: TipDistributionArgs,
@@ -119,12 +118,12 @@ pub struct JitoScheduler {
     metrics: BatchMetrics,
 }
 
-impl JitoScheduler {
+impl BatchScheduler {
     #[must_use]
     pub fn new(
         shutdown: CancellationToken,
         events: Option<EventEmitter>,
-        args: JitoSchedulerArgs,
+        args: BatchSchedulerArgs,
     ) -> (Self, JoinHandle<()>) {
         let (jito_tx, jito_rx) = crossbeam_channel::bounded(1024);
         let jito_thread = JitoThread::spawn(
@@ -144,7 +143,7 @@ impl JitoScheduler {
     fn new_with_jito(
         shutdown: CancellationToken,
         events: Option<EventEmitter>,
-        JitoSchedulerArgs {
+        BatchSchedulerArgs {
             tip,
             jito: _,
             keypair,
@@ -153,7 +152,7 @@ impl JitoScheduler {
             checked_capacity,
             bundle_capacity,
             runtime,
-        }: JitoSchedulerArgs,
+        }: BatchSchedulerArgs,
         jito_rx: crossbeam_channel::Receiver<JitoUpdate>,
     ) -> Self {
         let JitoUpdate::BuilderConfig(builder_config) =
@@ -1445,7 +1444,7 @@ mod tests {
         latest_blockhash: [0; 32],
     };
 
-    fn test_scheduler() -> (JitoScheduler, crossbeam_channel::Sender<JitoUpdate>) {
+    fn test_scheduler() -> (BatchScheduler, crossbeam_channel::Sender<JitoUpdate>) {
         let (jito_tx, jito_rx) = crossbeam_channel::bounded(1024);
 
         // Scheduler blocks until we give it an initial builder config.
@@ -1456,7 +1455,7 @@ mod tests {
             }))
             .unwrap();
 
-        let args = JitoSchedulerArgs {
+        let args = BatchSchedulerArgs {
             tip: TipDistributionArgs {
                 vote_account: Pubkey::new_unique(),
                 merkle_authority: Pubkey::new_unique(),
@@ -1474,7 +1473,7 @@ mod tests {
             bundle_capacity: 16,
             runtime: RuntimeConfig::default(),
         };
-        let scheduler = JitoScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
+        let scheduler = BatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
 
         (scheduler, jito_tx)
     }
@@ -1493,7 +1492,7 @@ mod tests {
     }
 
     type SetupExecuting = (
-        JitoScheduler,
+        BatchScheduler,
         TestBridge<PriorityId>,
         crossbeam_channel::Sender<JitoUpdate>,
         ScheduleBatch<Vec<KeyedTransactionMeta<PriorityId>>>,

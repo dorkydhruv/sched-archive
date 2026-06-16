@@ -7,11 +7,9 @@ use solana_sdk_ids::system_program;
 use solana_transaction::Transaction;
 use solana_transaction::versioned::VersionedTransaction;
 
-pub(crate) const TIP_PAYMENT_PROGRAM: Pubkey =
-    pubkey!("T1pyyaTNZsKv2WcRAB8oVnk93mLJw2XzjtVYqCsaHqt");
-pub(crate) const TIP_PAYMENT_CONFIG: Pubkey =
-    pubkey!("HgzT81VF1xZ3FT9Eq1pHhea7Wcfq2bv4tWTP3VvJ8Y9D");
-pub(crate) const TIP_ACCOUNTS: [Pubkey; 8] = [
+pub const TIP_PAYMENT_PROGRAM: Pubkey = pubkey!("T1pyyaTNZsKv2WcRAB8oVnk93mLJw2XzjtVYqCsaHqt");
+pub const TIP_PAYMENT_CONFIG: Pubkey = pubkey!("HgzT81VF1xZ3FT9Eq1pHhea7Wcfq2bv4tWTP3VvJ8Y9D");
+pub const TIP_ACCOUNTS: [Pubkey; 8] = [
     pubkey!("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5"),
     pubkey!("HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe"),
     pubkey!("Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY"),
@@ -32,7 +30,7 @@ pub struct TipDistributionArgs {
     pub commission_bps: u16,
 }
 
-pub(crate) fn init_tip_distribution(
+pub fn init_tip_distribution(
     keypair: &Keypair,
     TipDistributionArgs {
         vote_account,
@@ -79,15 +77,15 @@ pub(crate) fn init_tip_distribution(
     (distribution_key, wincode::serialize(&tx).unwrap())
 }
 
-pub(crate) struct ChangeTipReceiverArgs {
-    pub(crate) old_tip_receiver: Pubkey,
-    pub(crate) new_tip_receiver: Pubkey,
-    pub(crate) old_block_builder: Pubkey,
-    pub(crate) new_block_builder: Pubkey,
-    pub(crate) block_builder_commission: u64,
+pub struct ChangeTipReceiverArgs {
+    pub old_tip_receiver: Pubkey,
+    pub new_tip_receiver: Pubkey,
+    pub old_block_builder: Pubkey,
+    pub new_block_builder: Pubkey,
+    pub block_builder_commission: u64,
 }
 
-pub(crate) fn change_tip_receiver(
+pub fn change_tip_receiver(
     keypair: &Keypair,
     ChangeTipReceiverArgs {
         old_tip_receiver,

@@ -10,7 +10,6 @@ use crate::scheduler_thread::SchedulerThread;
 mod args;
 mod config_store;
 mod scheduler_thread;
-mod web_server;
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let args = crate::args::Args::parse();

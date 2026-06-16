@@ -61,15 +61,16 @@ dependencies = [
  "agave-scheduler-bindings",
  "agave-scheduling-utils",
  "axum 0.8.9",
+ "batch-scheduler",
  "clap",
  "futures",
- "jito-scheduler",
  "schedulers",
  "serde",
  "serde_json",
  "serde_with",
  "solana-keypair",
  "solana-pubkey 3.0.0",
+ "tighter-batch-scheduler",
  "tokio",
  "tokio-util",
  "toml",
@@ -442,6 +443,49 @@ name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
+
+[[package]]
+name = "batch-scheduler"
+version = "0.1.0"
+dependencies = [
+ "agave-scheduler-bindings",
+ "agave-scheduling-utils",
+ "agave-transaction-view",
+ "arrayref",
+ "borsh",
+ "crossbeam-channel",
+ "eyre",
+ "futures",
+ "indexmap 2.14.0",
+ "jito-protos",
+ "metrics",
+ "min-max-heap",
+ "schedulers",
+ "solana-clock",
+ "solana-compute-budget-instruction",
+ "solana-compute-budget-interface",
+ "solana-cost-model",
+ "solana-fee",
+ "solana-fee-structure",
+ "solana-hash 3.1.0",
+ "solana-keypair",
+ "solana-message 3.1.0",
+ "solana-packet 3.0.0",
+ "solana-pubkey 3.0.0",
+ "solana-pubsub-client",
+ "solana-rpc-client",
+ "solana-rpc-client-types",
+ "solana-runtime-transaction",
+ "solana-sdk-ids",
+ "solana-svm-transaction",
+ "solana-transaction 4.1.1",
+ "static_assertions",
+ "tokio",
+ "tokio-util",
+ "tonic",
+ "tracing",
+ "wincode",
+]
 
 [[package]]
 name = "bincode"
@@ -1965,49 +2009,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jito-scheduler"
-version = "0.1.0"
-dependencies = [
- "agave-scheduler-bindings",
- "agave-scheduling-utils",
- "agave-transaction-view",
- "arrayref",
- "borsh",
- "crossbeam-channel",
- "eyre",
- "futures",
- "indexmap 2.14.0",
- "jito-protos",
- "metrics",
- "min-max-heap",
- "schedulers",
- "solana-clock",
- "solana-compute-budget-instruction",
- "solana-compute-budget-interface",
- "solana-cost-model",
- "solana-fee",
- "solana-fee-structure",
- "solana-hash 3.1.0",
- "solana-keypair",
- "solana-message 3.1.0",
- "solana-packet 3.0.0",
- "solana-pubkey 3.0.0",
- "solana-pubsub-client",
- "solana-rpc-client",
- "solana-rpc-client-types",
- "solana-runtime-transaction",
- "solana-sdk-ids",
- "solana-svm-transaction",
- "solana-transaction 4.1.1",
- "static_assertions",
- "tokio",
- "tokio-util",
- "tonic",
- "tracing",
- "wincode",
-]
-
-[[package]]
 name = "jobserver"
 version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3082,10 +3083,21 @@ dependencies = [
 name = "schedulers"
 version = "0.1.0"
 dependencies = [
+ "agave-feature-set 4.2.0-alpha.0",
+ "agave-scheduler-bindings",
  "agave-scheduling-utils",
  "agave-transaction-view",
+ "arrayref",
+ "borsh",
  "chrono",
+ "crossbeam-channel",
  "expect-test",
+ "eyre",
+ "futures",
+ "indexmap 2.14.0",
+ "jito-protos",
+ "metrics",
+ "min-max-heap",
  "serde",
  "serde_json",
  "serde_repr",
@@ -3095,15 +3107,26 @@ dependencies = [
  "solana-compute-budget-interface",
  "solana-cost-model",
  "solana-fee",
+ "solana-fee-structure",
  "solana-hash 3.1.0",
  "solana-keypair",
  "solana-message 3.1.0",
+ "solana-packet 3.0.0",
+ "solana-pubkey 3.0.0",
+ "solana-pubsub-client",
+ "solana-rpc-client",
+ "solana-rpc-client-types",
  "solana-runtime-transaction",
+ "solana-sdk-ids",
  "solana-signature",
+ "solana-svm-transaction",
  "solana-system-transaction",
  "solana-transaction 4.1.1",
+ "static_assertions",
  "strum",
  "tokio",
+ "tokio-util",
+ "tonic",
  "tracing",
  "wincode",
 ]
@@ -5472,6 +5495,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
 dependencies = [
  "num_cpus",
+]
+
+[[package]]
+name = "tighter-batch-scheduler"
+version = "0.1.0"
+dependencies = [
+ "agave-scheduler-bindings",
+ "agave-scheduling-utils",
+ "agave-transaction-view",
+ "arrayref",
+ "borsh",
+ "crossbeam-channel",
+ "eyre",
+ "futures",
+ "indexmap 2.14.0",
+ "jito-protos",
+ "metrics",
+ "min-max-heap",
+ "schedulers",
+ "solana-clock",
+ "solana-compute-budget-instruction",
+ "solana-compute-budget-interface",
+ "solana-cost-model",
+ "solana-fee",
+ "solana-fee-structure",
+ "solana-hash 3.1.0",
+ "solana-keypair",
+ "solana-message 3.1.0",
+ "solana-packet 3.0.0",
+ "solana-pubkey 3.0.0",
+ "solana-pubsub-client",
+ "solana-rpc-client",
+ "solana-rpc-client-types",
+ "solana-runtime-transaction",
+ "solana-sdk-ids",
+ "solana-svm-transaction",
+ "solana-transaction 4.1.1",
+ "static_assertions",
+ "tokio",
+ "tokio-util",
+ "tonic",
+ "tracing",
+ "wincode",
 ]
 
 [[package]]

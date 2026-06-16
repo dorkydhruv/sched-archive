@@ -1,5 +1,5 @@
 [package]
-name = "jito-scheduler"
+name = "tighter-batch-scheduler"
 version.workspace = true
 edition.workspace = true
 

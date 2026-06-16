@@ -26,8 +26,8 @@ use tonic::transport::{ClientTlsConfig, Endpoint};
 use tonic::{Request, Status};
 use tracing::{error, info};
 
-use crate::interval_stream::IntervalStream;
-use crate::tip_program::TIP_PAYMENT_CONFIG;
+use crate::IntervalStream;
+use crate::jito::tip_program::TIP_PAYMENT_CONFIG;
 
 #[derive(Debug, Clone)]
 pub struct JitoArgs {
@@ -36,14 +36,14 @@ pub struct JitoArgs {
     pub block_engine: String,
 }
 
-pub(crate) struct JitoThread {
+pub struct JitoThread {
     update_tx: crossbeam_channel::Sender<JitoUpdate>,
     endpoint: Endpoint,
     keypair: Arc<Keypair>,
 }
 
 impl JitoThread {
-    pub(crate) fn spawn(
+    pub fn spawn(
         shutdown: CancellationToken,
         update_tx: crossbeam_channel::Sender<JitoUpdate>,
         config: JitoArgs,
@@ -269,7 +269,7 @@ impl JitoThread {
     }
 }
 
-pub(crate) enum JitoUpdate {
+pub enum JitoUpdate {
     BuilderConfig(BuilderConfig),
     TipConfig(TipConfig),
     RecentBlockhash(Hash),
@@ -277,15 +277,15 @@ pub(crate) enum JitoUpdate {
     Bundle(Vec<Vec<u8>>),
 }
 
-pub(crate) struct BuilderConfig {
-    pub(crate) key: Pubkey,
-    pub(crate) commission: u64,
+pub struct BuilderConfig {
+    pub key: Pubkey,
+    pub commission: u64,
 }
 
 #[derive(Debug)]
-pub(crate) struct TipConfig {
-    pub(crate) tip_receiver: Pubkey,
-    pub(crate) block_builder: Pubkey,
+pub struct TipConfig {
+    pub tip_receiver: Pubkey,
+    pub block_builder: Pubkey,
 }
 
 struct AuthInterceptor {

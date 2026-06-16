@@ -1,9 +1,14 @@
 pub mod events;
+mod interval_stream;
+pub mod jito;
+pub mod tighter_batch;
 mod shared;
+pub use interval_stream::IntervalStream;
+pub use tighter_batch::tighter_batch_priority;
+pub use shared::PriorityId;
 
 use agave_scheduling_utils::{bridge::RuntimeState, transaction_ptr::TransactionPtr};
 use agave_transaction_view::transaction_view::SanitizedTransactionView;
-pub use shared::PriorityId;
 use solana_compute_budget_instruction::compute_budget_instruction_details;
 use solana_cost_model::cost_model::CostModel;
 use solana_runtime_transaction::runtime_transaction::RuntimeTransaction;

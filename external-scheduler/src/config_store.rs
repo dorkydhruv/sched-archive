@@ -22,7 +22,6 @@ impl Default for ConfigStore {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ConfigData {
-    pub host_name: String,
     #[serde(default)]
     pub logs_server: Vec<String>,
     pub filter_keys: HashSet<Pubkey>,
@@ -32,24 +31,60 @@ pub struct ConfigData {
 impl Default for ConfigData {
     fn default() -> Self {
         Self {
-            host_name: "dev".to_string(),
             logs_server: Vec::new(),
             filter_keys: HashSet::new(),
-            scheduler: SchedulerConfigData::JitoScheduler(JitoSchedulerConfigData::default()),
+            scheduler: SchedulerConfigData::BatchScheduler(BatchSchedulerConfigData::default()),
         }
     }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub enum SchedulerConfigData {
-    JitoScheduler(JitoSchedulerConfigData),
-    Fifo,
-    GreedyRevenue,
-    GreedyThroughput,
+    BatchScheduler(BatchSchedulerConfigData),
+    TighterBatchScheduler(TighterBatchSchedulerConfigData),
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct JitoSchedulerConfigData {
+pub struct TighterBatchSchedulerConfigData {
+    pub keypair_path: String,
+    pub tip: TipDistributionConfigData,
+    pub jito: JitoConfigData,
+     // Scoring weights for composite value-score
+    pub weight_fee: u64,
+    pub weight_efficiency: u64,
+    pub min_score: u64,
+     // Runtime-tunable params (not persisted, updated via UI)
+    pub unchecked_capacity: usize,
+    pub checked_capacity: usize,
+    pub bundle_capacity: usize,
+    pub block_fill_cutoff: u8,
+    pub max_check_batches: u8,
+    pub bundle_expiry_ms: u64,
+    pub progress_timeout_sec: u64,
+}
+
+impl Default for TighterBatchSchedulerConfigData {
+    fn default() -> Self {
+        Self {
+            keypair_path: String::new(),
+            tip: TipDistributionConfigData::default(),
+            jito: JitoConfigData::default(),
+            weight_fee: 1,
+            weight_efficiency: 1,
+            min_score: 0,
+            unchecked_capacity: 64 * 1024,
+            checked_capacity: 64 * 1024,
+            bundle_capacity: 1024,
+            block_fill_cutoff: 20,
+            max_check_batches: 4,
+            bundle_expiry_ms: 200,
+            progress_timeout_sec: 5,
+         }
+     }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct BatchSchedulerConfigData {
     pub keypair_path: String,
     pub tip: TipDistributionConfigData,
     pub jito: JitoConfigData,
@@ -63,7 +98,7 @@ pub struct JitoSchedulerConfigData {
     pub progress_timeout_sec: u64,
 }
 
-impl Default for JitoSchedulerConfigData {
+impl Default for BatchSchedulerConfigData {
     fn default() -> Self {
         Self {
             keypair_path: String::new(),
@@ -127,35 +162,10 @@ impl ConfigStore {
     pub fn read(&self) -> ConfigData {
         self.inner.read().unwrap().clone()
     }
-
-    pub fn update(&self, update: ConfigUpdate) {
-        let mut data = self.inner.write().unwrap();
-
-        if let Some(host_name) = update.host_name {
-            data.host_name = host_name;
-        }
-
-        if let Some(scheduler) = update.scheduler {
-            data.scheduler = scheduler;
-        }
-
-        if let Some(filter_keys) = update.filter_keys {
-            data.filter_keys = filter_keys;
-        }
-    }
-}
-
-/// Updates that can be applied to the config store.
-#[derive(Debug, Default, serde::Deserialize)]
-pub struct ConfigUpdate {
-    pub host_name: Option<String>,
-    pub scheduler: Option<SchedulerConfigData>,
-    pub filter_keys: Option<HashSet<Pubkey>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct FileConfigData {
-    host_name: String,
     #[serde(default)]
     logs_server: Vec<String>,
     #[serde(default)]
@@ -166,11 +176,13 @@ struct FileConfigData {
 #[derive(Debug, serde::Deserialize)]
 struct FileSchedulerConfigData {
     #[serde(rename = "Batch")]
-    batch: FileJitoSchedulerConfigData,
+    batch: FileBatchSchedulerConfigData,
+    #[serde(rename = "TighterBatch")]
+    tighter_batch: FileTighterBatchSchedulerConfigData,
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct FileJitoSchedulerConfigData {
+struct FileBatchSchedulerConfigData {
     keypair_path: String,
     tip: TipDistributionConfigData,
     jito: JitoConfigData,
@@ -190,23 +202,69 @@ struct FileJitoSchedulerConfigData {
     progress_timeout_sec: u64,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct FileTighterBatchSchedulerConfigData {
+    keypair_path: String,
+    tip: TipDistributionConfigData,
+    jito: JitoConfigData,
+    #[serde(default = "default_weight_fee")]
+    weight_fee: u64,
+    #[serde(default = "default_weight_efficiency")]
+    weight_efficiency: u64,
+    #[serde(default = "default_min_score")]
+    min_score: u64,
+    #[serde(default = "default_unchecked_capacity")]
+    unchecked_capacity: usize,
+    #[serde(default = "default_checked_capacity")]
+    checked_capacity: usize,
+    #[serde(default = "default_bundle_capacity")]
+    bundle_capacity: usize,
+    #[serde(default = "default_block_fill_cutoff")]
+    block_fill_cutoff: u8,
+    #[serde(default = "default_max_check_batches")]
+    max_check_batches: u8,
+    #[serde(default = "default_bundle_expiry_ms")]
+    bundle_expiry_ms: u64,
+    #[serde(default = "default_progress_timeout_sec")]
+    progress_timeout_sec: u64,
+}
+
 impl From<FileConfigData> for ConfigData {
     fn from(file_config: FileConfigData) -> Self {
         Self {
-            host_name: file_config.host_name,
             logs_server: file_config.logs_server,
             filter_keys: file_config.filter_keys,
-            scheduler: SchedulerConfigData::JitoScheduler(file_config.scheduler.batch.into()),
+            scheduler: SchedulerConfigData::BatchScheduler(file_config.scheduler.batch.into()),
         }
     }
 }
 
-impl From<FileJitoSchedulerConfigData> for JitoSchedulerConfigData {
-    fn from(file_config: FileJitoSchedulerConfigData) -> Self {
+impl From<FileBatchSchedulerConfigData> for BatchSchedulerConfigData {
+    fn from(file_config: FileBatchSchedulerConfigData) -> Self {
         Self {
             keypair_path: file_config.keypair_path,
             tip: file_config.tip,
             jito: file_config.jito,
+            unchecked_capacity: file_config.unchecked_capacity,
+            checked_capacity: file_config.checked_capacity,
+            bundle_capacity: file_config.bundle_capacity,
+            block_fill_cutoff: file_config.block_fill_cutoff,
+            max_check_batches: file_config.max_check_batches,
+            bundle_expiry_ms: file_config.bundle_expiry_ms,
+            progress_timeout_sec: file_config.progress_timeout_sec,
+        }
+    }
+}
+
+impl From<FileTighterBatchSchedulerConfigData> for TighterBatchSchedulerConfigData {
+    fn from(file_config: FileTighterBatchSchedulerConfigData) -> Self {
+        Self {
+            keypair_path: file_config.keypair_path,
+            tip: file_config.tip,
+            jito: file_config.jito,
+            weight_fee: file_config.weight_fee,
+            weight_efficiency: file_config.weight_efficiency,
+            min_score: file_config.min_score,
             unchecked_capacity: file_config.unchecked_capacity,
             checked_capacity: file_config.checked_capacity,
             bundle_capacity: file_config.bundle_capacity,
@@ -244,4 +302,16 @@ fn default_bundle_expiry_ms() -> u64 {
 
 fn default_progress_timeout_sec() -> u64 {
     5
+}
+
+fn default_weight_fee() -> u64 {
+    1
+}
+
+fn default_weight_efficiency() -> u64 {
+    1
+}
+
+fn default_min_score() -> u64 {
+    0
 }

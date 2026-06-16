@@ -3,11 +3,12 @@ use crate::config_store::{ConfigStore, SchedulerConfigData};
 use agave_scheduling_utils::bridge::SchedulerBindingsBridge;
 use agave_scheduling_utils::handshake::{ClientLogon, client};
 use futures::{StreamExt, stream::FuturesUnordered};
-use jito_scheduler::jito_thread::JitoArgs;
-use jito_scheduler::scheduler::{JitoScheduler, JitoSchedulerArgs, RuntimeConfig};
-use jito_scheduler::tip_program::TipDistributionArgs;
+use batch_scheduler::{BatchScheduler, BatchSchedulerArgs};
+use tighter_batch_scheduler::{TighterBatchScheduler, TighterBatchSchedulerArgs};
 use schedulers::PriorityId;
 use schedulers::events::{EventContext, EventEmitter};
+use schedulers::jito::jito_thread::JitoArgs;
+use schedulers::jito::tip_program::TipDistributionArgs;
 use solana_keypair::{EncodableKey, Keypair};
 use solana_pubkey::Pubkey;
 use std::str::FromStr;
@@ -74,32 +75,32 @@ impl SchedulerThread {
         // Load initial config from store (synchronous, no block_on needed).
         let initial_config = config_store.read();
         match initial_config.scheduler {
-            SchedulerConfigData::JitoScheduler(jito) => {
-                let keypair = Arc::new(Keypair::read_from_file(&jito.keypair_path).unwrap());
-                let (scheduler, jito_thread) = JitoScheduler::new(
+            SchedulerConfigData::BatchScheduler(batch) => {
+                let keypair = Arc::new(Keypair::read_from_file(&batch.keypair_path).unwrap());
+                let (scheduler, jito_thread) = BatchScheduler::new(
                     shutdown.clone(),
                     events,
-                    JitoSchedulerArgs {
+                    BatchSchedulerArgs {
                         tip: TipDistributionArgs {
-                            vote_account: Pubkey::from_str(&jito.tip.vote_account).unwrap(),
-                            merkle_authority: Pubkey::from_str(&jito.tip.merkle_authority).unwrap(),
-                            commission_bps: jito.tip.commission_bps,
+                            vote_account: Pubkey::from_str(&batch.tip.vote_account).unwrap(),
+                            merkle_authority: Pubkey::from_str(&batch.tip.merkle_authority).unwrap(),
+                            commission_bps: batch.tip.commission_bps,
                         },
                         jito: JitoArgs {
-                            http_rpc: jito.jito.http_rpc,
-                            ws_rpc: jito.jito.ws_rpc,
-                            block_engine: jito.jito.block_engine,
+                            http_rpc: batch.jito.http_rpc,
+                            ws_rpc: batch.jito.ws_rpc,
+                            block_engine: batch.jito.block_engine,
                         },
                         keypair,
                         filter_keys: initial_config.filter_keys,
-                        unchecked_capacity: jito.unchecked_capacity,
-                        checked_capacity: jito.checked_capacity,
-                        bundle_capacity: jito.bundle_capacity,
-                        runtime: RuntimeConfig {
-                            max_check_batches: jito.max_check_batches as usize,
-                            block_fill_cutoff: jito.block_fill_cutoff,
-                            progress_timeout: Duration::from_secs(jito.progress_timeout_sec),
-                            bundle_expiry: Duration::from_millis(jito.bundle_expiry_ms),
+                        unchecked_capacity: batch.unchecked_capacity,
+                        checked_capacity: batch.checked_capacity,
+                        bundle_capacity: batch.bundle_capacity,
+                        runtime: batch_scheduler::RuntimeConfig {
+                            max_check_batches: batch.max_check_batches as usize,
+                            block_fill_cutoff: batch.block_fill_cutoff,
+                            progress_timeout: Duration::from_secs(batch.progress_timeout_sec),
+                            bundle_expiry: Duration::from_millis(batch.bundle_expiry_ms),
                         },
                     },
                 );
@@ -113,9 +114,51 @@ impl SchedulerThread {
                 ));
                 threads.push(jito_thread);
             }
-            SchedulerConfigData::Fifo => todo!(),
-            SchedulerConfigData::GreedyRevenue => todo!(),
-            SchedulerConfigData::GreedyThroughput => todo!(),
+            // add more schedulers here as needed
+             SchedulerConfigData::TighterBatchScheduler(tighter_batch) => {
+                let keypair = Arc::new(Keypair::read_from_file(&tighter_batch.keypair_path).unwrap());
+                let (scheduler, jito_thread) = TighterBatchScheduler::new(
+                    shutdown.clone(),
+                    events,
+                    TighterBatchSchedulerArgs {
+                        tip: TipDistributionArgs {
+                            vote_account: Pubkey::from_str(&tighter_batch.tip.vote_account).unwrap(),
+                            merkle_authority: Pubkey::from_str(&tighter_batch.tip.merkle_authority).unwrap(),
+                            commission_bps: tighter_batch.tip.commission_bps,
+                         },
+                        jito: JitoArgs {
+                            http_rpc: tighter_batch.jito.http_rpc,
+                            ws_rpc: tighter_batch.jito.ws_rpc,
+                            block_engine: tighter_batch.jito.block_engine,
+                         },
+                        keypair,
+                        filter_keys: initial_config.filter_keys,
+                        unchecked_capacity: tighter_batch.unchecked_capacity,
+                        checked_capacity: tighter_batch.checked_capacity,
+                        bundle_capacity: tighter_batch.bundle_capacity,
+                        scoring: schedulers::tighter_batch::TighterBatchConfig {
+                            weight_fee: tighter_batch.weight_fee,
+                            weight_efficiency: tighter_batch.weight_efficiency,
+                            min_score: tighter_batch.min_score,
+                         },
+                        runtime: tighter_batch_scheduler::RuntimeConfig {
+                            max_check_batches: tighter_batch.max_check_batches as usize,
+                            block_fill_cutoff: tighter_batch.block_fill_cutoff,
+                            progress_timeout: Duration::from_secs(tighter_batch.progress_timeout_sec),
+                            bundle_expiry: Duration::from_millis(tighter_batch.bundle_expiry_ms),
+                         },
+                      },
+                  );
+
+                threads.push(crate::scheduler_thread::spawn(
+                    shutdown.clone(),
+                    args.bindings_ipc,
+                    config_store.clone(),
+                    scheduler,
+                    5,
+                  ));
+                threads.push(jito_thread);
+             }
         }
 
         // Use tokio to listen on all thread exits concurrently.
@@ -216,7 +259,7 @@ where
     );
 }
 
-impl Scheduler for JitoScheduler {
+impl Scheduler for BatchScheduler {
     type Meta = PriorityId;
 
     fn poll(
@@ -227,15 +270,15 @@ impl Scheduler for JitoScheduler {
         // Read runtime config from the shared store each poll cycle (synchronous, no block_on needed)
         let runtime_config = config_store.read();
         // Apply runtime-tunable config updates to the scheduler
-        if let SchedulerConfigData::JitoScheduler(jito_config) = &runtime_config.scheduler {
+        if let SchedulerConfigData::BatchScheduler(batch_config) = &runtime_config.scheduler {
             self.set_runtime_config(
-                jito_config.unchecked_capacity,
-                jito_config.checked_capacity,
-                jito_config.bundle_capacity,
-                jito_config.block_fill_cutoff,
-                jito_config.max_check_batches as usize,
-                Duration::from_millis(jito_config.bundle_expiry_ms),
-                Duration::from_secs(jito_config.progress_timeout_sec),
+                batch_config.unchecked_capacity,
+                batch_config.checked_capacity,
+                batch_config.bundle_capacity,
+                batch_config.block_fill_cutoff,
+                batch_config.max_check_batches as usize,
+                Duration::from_millis(batch_config.bundle_expiry_ms),
+                Duration::from_secs(batch_config.progress_timeout_sec),
             );
         }
 
@@ -243,26 +286,29 @@ impl Scheduler for JitoScheduler {
     }
 }
 
-// impl Scheduler for FifoScheduler {
-//     type Meta = ();
+impl Scheduler for TighterBatchScheduler {
+    type Meta = PriorityId;
 
-//     fn poll(&mut self, bridge: &mut SchedulerBindingsBridge<Self::Meta>, _config_store: &ConfigStore) {
-//         self.poll(bridge);
-//      }
-// }
+    fn poll(
+         &mut self,
+        bridge: &mut SchedulerBindingsBridge<Self::Meta>,
+        config_store: &ConfigStore,
+    ) {
+         // Read runtime config from the shared store each poll cycle (synchronous, no block_on needed)
+        let runtime_config = config_store.read();
+         // Apply runtime-tunable config updates to the scheduler
+        if let SchedulerConfigData::TighterBatchScheduler(tighter_config) = &runtime_config.scheduler {
+            self.set_runtime_config(
+                tighter_config.unchecked_capacity,
+                tighter_config.checked_capacity,
+                tighter_config.bundle_capacity,
+                tighter_config.block_fill_cutoff,
+                tighter_config.max_check_batches as usize,
+                Duration::from_millis(tighter_config.bundle_expiry_ms),
+                Duration::from_secs(tighter_config.progress_timeout_sec),
+             );
+         }
 
-// impl Scheduler for GreedyRevenueScheduler {
-//     type Meta = PriorityId;
-
-//     fn poll(&mut self, bridge: &mut SchedulerBindingsBridge<Self::Meta>, _config_store: &ConfigStore) {
-//         self.poll(bridge);
-//      }
-// }
-
-// impl Scheduler for GreedyThroughputScheduler {
-//     type Meta = PriorityId;
-
-//     fn poll(&mut self, bridge: &mut SchedulerBindingsBridge<Self::Meta>, _config_store: &ConfigStore) {
-//         self.poll(bridge);
-//      }
-// }
+        self.poll(bridge);
+     }
+}
