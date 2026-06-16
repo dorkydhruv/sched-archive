@@ -484,10 +484,9 @@ impl TighterBatchScheduler {
 
         // TODO: Need to dedupe already seen transactions?
         bridge.drain_tpu(
-            |bridge, key| match self.calculate_priority(
-                bridge.runtime(),
-                &bridge.transaction(key).data,
-            ) {
+            |bridge, key| match self
+                .calculate_priority(bridge.runtime(), &bridge.transaction(key).data)
+            {
                 Some((priority, cost)) => {
                     if self.should_filter_static(&bridge.transaction(key).data) {
                         self.metrics.recv_tpu_filtered.increment(1);
@@ -598,10 +597,10 @@ impl TighterBatchScheduler {
     }
 
     fn on_bundle(
-            &mut self,
+        &mut self,
         bridge: &mut SchedulerBindingsBridge<PriorityId>,
         bundle: Vec<Vec<u8>>,
-         ) {
+    ) {
         let mut keys = Vec::with_capacity(bundle.len());
         let mut total_cost: u64 = 0;
         let mut total_score: u64 = 0;
@@ -609,79 +608,79 @@ impl TighterBatchScheduler {
 
         for packet in bundle {
             let Ok(key) = bridge.insert_transaction(&packet) else {
-                     // drop the entire bundle if any transaction fails to insert
+                // drop the entire bundle if any transaction fails to insert
                 for key in keys {
                     bridge.drop_transaction(key);
-                     }
+                }
                 self.metrics.recv_bundle_err.increment(1);
 
                 return;
-                 };
+            };
 
-                 // Add to our bundle keys.
+            // Add to our bundle keys.
             keys.push(key);
 
-                 // Calculate composite score using tighter-batch scoring.
+            // Calculate composite score using tighter-batch scoring.
             let tx_view = &bridge.transaction(key).data;
             let (score, cost) = match derive_costs(tx_view, &feature_set) {
-                   Some(costs) => {
-                       let score = tighter_batch_score(&costs, &self.scoring);
-                        (score, costs.total_cost)
+                Some(costs) => {
+                    let score = tighter_batch_score(&costs, &self.scoring);
+                    (score, costs.total_cost)
+                }
+                // Fall back to simple reward/cost if derive_costs fails.
+                None => {
+                    let Some((cost, reward)) =
+                        schedulers::calculate_cost_and_reward(bridge.runtime(), tx_view)
+                    else {
+                        // drop the entire bundle if any tx fails to score
+                        for key in keys {
+                            bridge.drop_transaction(key);
                         }
-                     // Fall back to simple reward/cost if derive_costs fails.
-                   None => {
-                       let Some((cost, reward)) = schedulers::calculate_cost_and_reward(
-                           bridge.runtime(), tx_view,
-                         ) else {
-                                // drop the entire bundle if any tx fails to score
-                          for key in keys {
-                              bridge.drop_transaction(key);
-                                }
-                          self.metrics.recv_bundle_err.increment(1);
-                          return;
-                            };
-                        // Add tip to reward for fallback path.
-                       let tip = Self::extract_tip(tx_view);
-                        (reward.saturating_add(tip), cost)
-                         }
-                     };
+                        self.metrics.recv_bundle_err.increment(1);
+                        return;
+                    };
+                    // Add tip to reward for fallback path.
+                    let tip = Self::extract_tip(tx_view);
+                    (reward.saturating_add(tip), cost)
+                }
+            };
 
-                 // Apply minimum score filter.
+            // Apply minimum score filter.
             if score < self.scoring.min_score {
-                     // drop the entire bundle if any tx is below min score
+                // drop the entire bundle if any tx is below min score
                 for key in keys {
                     bridge.drop_transaction(key);
-                     }
+                }
                 self.metrics.recv_bundle_err.increment(1);
 
                 return;
-                 }
+            }
 
-                total_cost += cost;
-               total_score += score;
-               }
+            total_cost += cost;
+            total_score += score;
+        }
 
-               // Filter bundles containing transactions that reference filtered accounts.
+        // Filter bundles containing transactions that reference filtered accounts.
         if keys
-                 .iter()
-                 .any(|key| self.should_filter_static(&bridge.transaction(*key).data))
-             {
-                 // NB: We don't check ALTs on Jito bundles as these are assumed to be filtered
-                 // upstream.
+            .iter()
+            .any(|key| self.should_filter_static(&bridge.transaction(*key).data))
+        {
+            // NB: We don't check ALTs on Jito bundles as these are assumed to be filtered
+            // upstream.
             self.metrics.recv_bundle_filtered.increment(1);
             for key in keys {
                 bridge.drop_transaction(key);
-                  }
+            }
 
             return;
-              }
+        }
 
-               // Calculate bundle priority from composite score.
+        // Calculate bundle priority from composite score.
         let priority = total_score
-                 .saturating_mul(PRIORITY_MULTIPLIER)
-                 .min(BUNDLE_MARKER - 1);
+            .saturating_mul(PRIORITY_MULTIPLIER)
+            .min(BUNDLE_MARKER - 1);
 
-               // Emit ingest events for bundle transactions.
+        // Emit ingest events for bundle transactions.
         let bundle_sig = bridge.transaction(keys[0]).data.signatures()[0];
         let bundle_id = Arc::new(bundle_sig.to_string());
         for &key in &keys {
@@ -692,29 +691,29 @@ impl TighterBatchScheduler {
                 TransactionAction::Ingest {
                     source: TransactionSource::Jito,
                     bundle: Some(bundle_id.clone()),
-                      },
-                  );
-              }
+                },
+            );
+        }
 
-               // Evict lowest priority bundle if at capacity.
-            if self.bundles.len() == self.bundle_capacity {
-                let evicted = self.bundles.pop_first().unwrap();
-                for key in evicted.keys {
-                    bridge.drop_transaction(key);
-                  }
-                self.metrics.recv_bundle_evict.increment(1);
-              }
+        // Evict lowest priority bundle if at capacity.
+        if self.bundles.len() == self.bundle_capacity {
+            let evicted = self.bundles.pop_first().unwrap();
+            for key in evicted.keys {
+                bridge.drop_transaction(key);
+            }
+            self.metrics.recv_bundle_evict.increment(1);
+        }
 
-            self.metrics.recv_bundle_ok.increment(1);
-               // TODO: If Jito sends us a transaction (not a bundle) with overlapping
-               // read/write keys we will panic as normally CHECK prevents this.
-            self.bundles.insert(BundleId {
-                priority,
-                cost: total_cost,
-                received_at: Instant::now(),
-                keys,
-              });
-          }
+        self.metrics.recv_bundle_ok.increment(1);
+        // TODO: If Jito sends us a transaction (not a bundle) with overlapping
+        // read/write keys we will panic as normally CHECK prevents this.
+        self.bundles.insert(BundleId {
+            priority,
+            cost: total_cost,
+            received_at: Instant::now(),
+            keys,
+        });
+    }
 
     fn drop_expired_bundles(&mut self, bridge: &mut SchedulerBindingsBridge<PriorityId>) {
         let now = Instant::now();
@@ -1240,17 +1239,17 @@ impl TighterBatchScheduler {
     }
 
     fn calculate_priority(
-         &self,
+        &self,
         runtime: &RuntimeState,
         tx: &SanitizedTransactionView<TransactionPtr>,
-     ) -> Option<(u64, u64)> {
-          // Use tighter-batch composite scoring
+    ) -> Option<(u64, u64)> {
+        // Use tighter-batch composite scoring
         let costs = derive_costs(tx, &runtime.feature_set)?;
         let score = tighter_batch_score(&costs, &self.scoring);
 
         let (priority, cost) = if score == 0 {
-             // Fallback to reward/CU when composite score truncates to zero
-             // due to integer division (fee too small relative to CU limit).
+            // Fallback to reward/CU when composite score truncates to zero
+            // due to integer division (fee too small relative to CU limit).
             let Some((cost, reward)) = schedulers::calculate_cost_and_reward(runtime, tx) else {
                 return None;
             };
@@ -1259,7 +1258,7 @@ impl TighterBatchScheduler {
                 .saturating_div(cost.saturating_add(1));
             (priority, cost)
         } else {
-             // Apply minimum score filter
+            // Apply minimum score filter
             if score < self.scoring.min_score {
                 return None;
             }
@@ -1516,36 +1515,36 @@ mod tests {
             scoring: TighterBatchConfig::default(),
             runtime: RuntimeConfig::default(),
         };
-        let scheduler = TighterBatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
+        let scheduler =
+            TighterBatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
 
         (scheduler, jito_tx)
     }
 
-
     fn test_scheduler_with_scoring(
         scoring: TighterBatchConfig,
-      ) -> (TighterBatchScheduler, crossbeam_channel::Sender<JitoUpdate>) {
+    ) -> (TighterBatchScheduler, crossbeam_channel::Sender<JitoUpdate>) {
         let (jito_tx, jito_rx) = crossbeam_channel::bounded(1024);
 
-          // Scheduler blocks until we give it an initial builder config.
+        // Scheduler blocks until we give it an initial builder config.
         jito_tx
-              .send(JitoUpdate::BuilderConfig(BuilderConfig {
+            .send(JitoUpdate::BuilderConfig(BuilderConfig {
                 key: Pubkey::new_unique(),
                 commission: 0,
-              }))
-              .unwrap();
+            }))
+            .unwrap();
 
         let args = TighterBatchSchedulerArgs {
             tip: TipDistributionArgs {
                 vote_account: Pubkey::new_unique(),
                 merkle_authority: Pubkey::new_unique(),
                 commission_bps: 0,
-              },
+            },
             jito: JitoArgs {
                 http_rpc: String::new(),
                 ws_rpc: String::new(),
                 block_engine: String::new(),
-              },
+            },
             keypair: Arc::new(Keypair::new()),
             filter_keys: HashSet::new(),
             unchecked_capacity: 64,
@@ -1553,11 +1552,12 @@ mod tests {
             bundle_capacity: 16,
             scoring,
             runtime: RuntimeConfig::default(),
-          };
-        let scheduler = TighterBatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
+        };
+        let scheduler =
+            TighterBatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
 
-          (scheduler, jito_tx)
-       }
+        (scheduler, jito_tx)
+    }
     fn noop_with_budget(payer: &Keypair, cu_limit: u32, cu_price: u64) -> VersionedTransaction {
         Transaction::new_signed_with_payer(
             &[
@@ -2473,20 +2473,48 @@ mod tests {
 
         // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
         let tip0 = bridge.pop_schedule().unwrap();
-        assert_ne!(tip0.flags & pack_message_flags::EXECUTE, 0, "expected first tip batch to execute");
+        assert_ne!(
+            tip0.flags & pack_message_flags::EXECUTE,
+            0,
+            "expected first tip batch to execute"
+        );
         let tip1 = bridge.pop_schedule().unwrap();
-        assert_ne!(tip1.flags & pack_message_flags::EXECUTE, 0, "expected second tip batch to execute");
+        assert_ne!(
+            tip1.flags & pack_message_flags::EXECUTE,
+            0,
+            "expected second tip batch to execute"
+        );
 
         // First user execute batch should be the bundle (higher priority).
         let exec_bundle = bridge.pop_schedule().unwrap();
-        assert_ne!(exec_bundle.flags & pack_message_flags::EXECUTE, 0, "the bundle executes");
-        assert_ne!(exec_bundle.flags & execution_flags::ALL_OR_NOTHING, 0, "the bundle is all or nothing");
-        assert_eq!(exec_bundle.transactions.len(), 1, "the bundle has one transaction");
+        assert_ne!(
+            exec_bundle.flags & pack_message_flags::EXECUTE,
+            0,
+            "the bundle executes"
+        );
+        assert_ne!(
+            exec_bundle.flags & execution_flags::ALL_OR_NOTHING,
+            0,
+            "the bundle is all or nothing"
+        );
+        assert_eq!(
+            exec_bundle.transactions.len(),
+            1,
+            "the bundle has one transaction"
+        );
 
         // Second execute batch should be the individual TX (lower priority).
         let exec_tx = bridge.pop_schedule().unwrap();
-        assert_eq!(exec_tx.flags, pack_message_flags::EXECUTE, "expected the second batch to be a normal execute batch for the individual TX");
-        assert_eq!(exec_tx.transactions.len(), 1, "the transaction has one transaction");
+        assert_eq!(
+            exec_tx.flags,
+            pack_message_flags::EXECUTE,
+            "expected the second batch to be a normal execute batch for the individual TX"
+        );
+        assert_eq!(
+            exec_tx.transactions.len(),
+            1,
+            "the transaction has one transaction"
+        );
 
         // Bundle was scheduled before the TX.
         assert_eq!(scheduler.bundles.len(), 0, "no more bundles left");
@@ -3230,7 +3258,12 @@ mod tests {
 
         // Remember the lowest priority checked TX.
         let lowest_debug = *scheduler.checked_tx.first().unwrap();
-        eprintln!("DEBUG checked_cap: lowest.priority={}, checked.len()={}, unchecked.len()={}", lowest_debug.priority, scheduler.checked_tx.len(), scheduler.unchecked_tx.len());
+        eprintln!(
+            "DEBUG checked_cap: lowest.priority={}, checked.len()={}, unchecked.len()={}",
+            lowest_debug.priority,
+            scheduler.checked_tx.len(),
+            scheduler.unchecked_tx.len()
+        );
         let lowest = lowest_debug;
 
         // Ingest one more TX and complete its check → should evict lowest checked.
@@ -3240,7 +3273,11 @@ mod tests {
         bridge.queue_progress(MOCK_PROGRESS);
         scheduler.poll(&mut bridge);
 
-        eprintln!("DEBUG checked_cap after poll: checked.len()={}, unchecked.len()={}", scheduler.checked_tx.len(), scheduler.unchecked_tx.len());
+        eprintln!(
+            "DEBUG checked_cap after poll: checked.len()={}, unchecked.len()={}",
+            scheduler.checked_tx.len(),
+            scheduler.unchecked_tx.len()
+        );
         // Complete the new TX's check.
         bridge.queue_all_checks_ok();
         bridge.queue_progress(MOCK_PROGRESS);
@@ -3260,51 +3297,51 @@ mod tests {
     }
 
     ///////////////////////
-     // Tighter-batch scoring edge cases
+    // Tighter-batch scoring edge cases
 
     #[test]
     fn bundle_dropped_when_any_tx_below_min_score() {
-          // Bundle with one tx below min_score should be entirely dropped.
+        // Bundle with one tx below min_score should be entirely dropped.
         let (mut scheduler, jito_tx) = test_scheduler_with_scoring(TighterBatchConfig {
             weight_fee: 1,
             weight_efficiency: 1,
             min_score: 100, // High threshold
-          });
+        });
         let mut bridge = TestBridge::new(5, 4);
 
-          // Build a 2-TX bundle where one tx has very low score.
+        // Build a 2-TX bundle where one tx has very low score.
         let payer_a = Keypair::new();
         let payer_b = Keypair::new();
 
-          // TX A: high score (low CU, decent fee)
+        // TX A: high score (low CU, decent fee)
         let tx_a = noop_with_budget(&payer_a, 1_000, 100_000);
 
-          // TX B: very low score (high CU, tiny fee) — will be below min_score
+        // TX B: very low score (high CU, tiny fee) — will be below min_score
         let tx_b = noop_with_budget(&payer_b, 14_000_000, 1);
 
         jito_tx
-             .send(JitoUpdate::Bundle(vec![
+            .send(JitoUpdate::Bundle(vec![
                 serialize_tx(&tx_a),
                 serialize_tx(&tx_b),
-             ]))
-             .unwrap();
+            ]))
+            .unwrap();
 
-          // Poll to drain jito messages.
+        // Poll to drain jito messages.
         scheduler.poll(&mut bridge);
 
-          // Assert - Bundle rejected because TX B is below min_score.
+        // Assert - Bundle rejected because TX B is below min_score.
         assert_eq!(scheduler.bundles.len(), 0);
         assert_eq!(bridge.tx_count(), 0);
-      }
+    }
 
-     #[test]
+    #[test]
     fn bundle_accepted_when_all_txs_above_min_score() {
-          // Bundle where all txs are above min_score should be accepted.
+        // Bundle where all txs are above min_score should be accepted.
         let (mut scheduler, jito_tx) = test_scheduler_with_scoring(TighterBatchConfig {
             weight_fee: 1,
             weight_efficiency: 1,
             min_score: 10, // Low threshold
-          });
+        });
         let mut bridge = TestBridge::new(5, 4);
 
         let payer_a = Keypair::new();
@@ -3313,164 +3350,206 @@ mod tests {
         let tx_b = noop_with_budget(&payer_b, 20_000, 30_000);
 
         jito_tx
-             .send(JitoUpdate::Bundle(vec![
+            .send(JitoUpdate::Bundle(vec![
                 serialize_tx(&tx_a),
                 serialize_tx(&tx_b),
-             ]))
-             .unwrap();
+            ]))
+            .unwrap();
 
         scheduler.poll(&mut bridge);
 
-          // Assert - Bundle accepted.
+        // Assert - Bundle accepted.
         assert_eq!(scheduler.bundles.len(), 1);
         assert_eq!(bridge.tx_count(), 2);
-      }
+    }
 
-     #[test]
+    #[test]
     fn high_fee_high_cu_loses_to_low_fee_low_cu() {
-          // A tx with high fee but also high CU should lose to a tx with lower fee
-          // but much tighter CU (when weight_efficiency is significant).
+        // A tx with high fee but also high CU should lose to a tx with lower fee
+        // but much tighter CU (when weight_efficiency is significant).
         let (mut scheduler, _jito_tx) = test_scheduler_with_scoring(TighterBatchConfig {
             weight_fee: 1,
             weight_efficiency: 10, // Emphasize efficiency
             min_score: 0,
-          });
+        });
         let mut bridge = TestBridge::new(5, 4);
 
-          // TX A: high fee, high CU (loose estimate)
+        // TX A: high fee, high CU (loose estimate)
         let payer_a = Keypair::new();
         let tx_a = noop_with_budget(&payer_a, 10_000_000, 100_000_000);
 
-          // TX B: lower fee, very low CU (tight estimate)
+        // TX B: lower fee, very low CU (tight estimate)
         let payer_b = Keypair::new();
         let tx_b = noop_with_budget(&payer_b, 5_000, 5_000_000);
 
         bridge.queue_tpu(&tx_a);
         bridge.queue_tpu(&tx_b);
 
-          // Poll - ingest & schedule checks.
+        // Poll - ingest & schedule checks.
         bridge.queue_progress(MOCK_PROGRESS);
         scheduler.poll(&mut bridge);
 
-          // Complete checks.
+        // Complete checks.
         bridge.queue_all_checks_ok();
         bridge.queue_progress(MOCK_PROGRESS);
         scheduler.poll(&mut bridge);
 
-          // Assert - TX B (tighter CU) should be in checked with higher priority.
+        // Assert - TX B (tighter CU) should be in checked with higher priority.
         assert_eq!(scheduler.checked_tx.len(), 2);
         let highest = *scheduler.checked_tx.last().unwrap();
-          // TX B should have higher priority due to efficiency bonus
+        // TX B should have higher priority due to efficiency bonus
         assert!(highest.priority > 0);
-      }
+    }
 
-     #[test]
+    #[test]
     fn bundle_priority_reflects_composite_score() {
-          // Bundle priority should be sum of individual composite scores * multiplier.
+        // Bundle priority should be sum of individual composite scores * multiplier.
         let (mut scheduler, jito_tx) = test_scheduler_with_scoring(TighterBatchConfig {
             weight_fee: 1,
             weight_efficiency: 1,
             min_score: 0,
-          });
+        });
         let mut bridge = TestBridge::new(5, 4);
 
-          // Build a bundle with 2 identical txs.
+        // Build a bundle with 2 identical txs.
         let payer = Keypair::new();
         let tx = noop_with_budget(&payer, 10_000, 100_000);
 
         jito_tx
-             .send(JitoUpdate::Bundle(vec![
+            .send(JitoUpdate::Bundle(vec![
                 serialize_tx(&tx),
                 serialize_tx(&tx),
-             ]))
-             .unwrap();
+            ]))
+            .unwrap();
 
         scheduler.poll(&mut bridge);
 
-          // Assert - bundle exists.
+        // Assert - bundle exists.
         assert_eq!(scheduler.bundles.len(), 1);
         let bundle = scheduler.bundles.last().unwrap();
 
-          // The bundle priority should be > 0 (composite score > 0 for both txs).
+        // The bundle priority should be > 0 (composite score > 0 for both txs).
         assert!(bundle.priority > 0);
-      }
+    }
 
-     #[test]
+    #[test]
     fn zero_cu_limit_tx_in_bundle_drops_bundle() {
-          // A tx with CU limit 0 gets very high efficiency bonus but cu_price may be 0.
-          // However, if min_score is 0, it should still score.
-          // But if the tx has 0 fee and 0 CU, score = 0 + u64::MAX which is valid.
+        // A tx with CU limit 0 gets very high efficiency bonus but cu_price may be 0.
+        // However, if min_score is 0, it should still score.
+        // But if the tx has 0 fee and 0 CU, score = 0 + u64::MAX which is valid.
         let (mut scheduler, jito_tx) = test_scheduler_with_scoring(TighterBatchConfig {
             weight_fee: 1,
             weight_efficiency: 1,
             min_score: 0,
-          });
+        });
         let mut bridge = TestBridge::new(5, 4);
 
         let payer = Keypair::new();
         let tx = noop_with_budget(&payer, 0, 0); // Edge case: zero fee, zero CU
 
         jito_tx
-             .send(JitoUpdate::Bundle(vec![serialize_tx(&tx)]))
-             .unwrap();
+            .send(JitoUpdate::Bundle(vec![serialize_tx(&tx)]))
+            .unwrap();
 
         scheduler.poll(&mut bridge);
 
-          // Assert - bundle accepted (score will be very high due to efficiency bonus).
+        // Assert - bundle accepted (score will be very high due to efficiency bonus).
         assert_eq!(scheduler.bundles.len(), 1);
-      }
+    }
 
-     #[test]
+    #[test]
     fn bundle_with_mixed_scores_uses_total() {
-          // Bundle priority is total of all tx scores, so a bundle with one low-score
-          // tx (but above min) can still beat a single high-score tx.
+        // Bundle priority is total of all tx scores, so a bundle with one low-score
+        // tx (but above min) can still beat a single high-score tx.
         let (mut scheduler, jito_tx) = test_scheduler_with_scoring(TighterBatchConfig {
             weight_fee: 1,
             weight_efficiency: 1,
             min_score: 0,
-          });
+        });
         let mut bridge = TestBridge::new(5, 4);
 
-          // Single TX with moderate score.
+        // Single TX with moderate score.
         let payer_single = Keypair::new();
         let tx_single = noop_with_budget(&payer_single, 100_000, 100);
         bridge.queue_tpu(&tx_single);
 
-          // Bundle with two txs, each with lower individual score but higher combined.
+        // Poll - ingest & schedule checks.
+        bridge.queue_progress(MOCK_PROGRESS);
+        scheduler.poll(&mut bridge);
+
+        // Complete checks.
+        bridge.queue_all_checks_ok();
+        bridge.queue_progress(MOCK_PROGRESS);
+        scheduler.poll(&mut bridge);
+        assert_eq!(scheduler.checked_tx.len(), 1);
+
+        // Bundle with two txs, each with lower individual score but higher combined.
         let payer_a = Keypair::new();
         let payer_b = Keypair::new();
         let tx_a = noop_with_budget(&payer_a, 10_000, 100_000);
         let tx_b = noop_with_budget(&payer_b, 10_000, 100_000);
         jito_tx
-             .send(JitoUpdate::Bundle(vec![
+            .send(JitoUpdate::Bundle(vec![
                 serialize_tx(&tx_a),
                 serialize_tx(&tx_b),
-             ]))
-             .unwrap();
+            ]))
+            .unwrap();
 
+        // Provide tip config before becoming leader.
+        jito_tx
+            .send(JitoUpdate::TipConfig(TipConfig {
+                tip_receiver: Pubkey::new_unique(),
+                block_builder: Pubkey::new_unique(),
+            }))
+            .unwrap();
         bridge.queue_progress(MOCK_PROGRESS);
         scheduler.poll(&mut bridge);
-
-          // Assert - both single TX and bundle are present.
-        assert_eq!(scheduler.checked_tx.len(), 1);
         assert_eq!(scheduler.bundles.len(), 1);
-      }
 
-     #[test]
+        // Transition to leader.
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
+        scheduler.poll(&mut bridge);
+
+        // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
+        let tip0 = bridge.pop_schedule().unwrap();
+        assert_ne!(tip0.flags & pack_message_flags::EXECUTE, 0);
+        let tip1 = bridge.pop_schedule().unwrap();
+        assert_ne!(tip1.flags & pack_message_flags::EXECUTE, 0);
+
+        // First user execute batch should be the bundle (higher priority).
+        let exec_bundle = bridge.pop_schedule().unwrap();
+        assert_ne!(exec_bundle.flags & pack_message_flags::EXECUTE, 0);
+        assert_ne!(exec_bundle.flags & execution_flags::ALL_OR_NOTHING, 0);
+        assert_eq!(exec_bundle.transactions.len(), 2);
+
+        // Second execute batch should be the individual TX (lower priority).
+        let exec_tx = bridge.pop_schedule().unwrap();
+        assert_eq!(exec_tx.flags, pack_message_flags::EXECUTE);
+        assert_eq!(exec_tx.transactions.len(), 1);
+
+        // Bundle was scheduled before the TX.
+        assert_eq!(scheduler.bundles.len(), 0);
+        assert_eq!(scheduler.checked_tx.len(), 0);
+    }
+
+    #[test]
     fn efficiency_heavy_weight_favors_tight_txs() {
-          // With weight_efficiency >> weight_fee, tight CU estimates should dominate.
+        // With weight_efficiency >> weight_fee, tight CU estimates should dominate.
         let (mut scheduler, _jito_tx) = test_scheduler_with_scoring(TighterBatchConfig {
             weight_fee: 1,
             weight_efficiency: 1000, // Heavy efficiency emphasis
             min_score: 0,
-          });
+        });
         let mut bridge = TestBridge::new(5, 4);
 
-          // TX A: loose estimate (high CU, moderate fee)
+        // TX A: loose estimate (high CU, moderate fee)
         let payer_a = Keypair::new();
         let tx_a = noop_with_budget(&payer_a, 10_000_000, 50_000_000);
 
-          // TX B: tight estimate (low CU, lower fee)
+        // TX B: tight estimate (low CU, lower fee)
         let payer_b = Keypair::new();
         let tx_b = noop_with_budget(&payer_b, 5_000, 10_000);
 
@@ -3484,30 +3563,30 @@ mod tests {
         bridge.queue_progress(MOCK_PROGRESS);
         scheduler.poll(&mut bridge);
 
-          // Assert - both txs in checked.
+        // Assert - both txs in checked.
         assert_eq!(scheduler.checked_tx.len(), 2);
 
-          // TX B should have much higher priority due to efficiency bonus.
+        // TX B should have much higher priority due to efficiency bonus.
         let highest = *scheduler.checked_tx.last().unwrap();
         let lowest = *scheduler.checked_tx.first().unwrap();
         assert!(highest.priority > lowest.priority);
-      }
+    }
 
-     #[test]
+    #[test]
     fn fee_heavy_weight_favors_high_fee_txs() {
-          // With weight_fee >> weight_efficiency, high fee txs should dominate.
+        // With weight_fee >> weight_efficiency, high fee txs should dominate.
         let (mut scheduler, _jito_tx) = test_scheduler_with_scoring(TighterBatchConfig {
             weight_fee: 1000, // Heavy fee emphasis
             weight_efficiency: 1,
             min_score: 0,
-          });
+        });
         let mut bridge = TestBridge::new(5, 4);
 
-          // TX A: high fee, loose CU
+        // TX A: high fee, loose CU
         let payer_a = Keypair::new();
         let tx_a = noop_with_budget(&payer_a, 1_000_000, 10_000_000);
 
-          // TX B: low fee, tight CU
+        // TX B: low fee, tight CU
         let payer_b = Keypair::new();
         let tx_b = noop_with_budget(&payer_b, 100, 1_000);
 
@@ -3521,12 +3600,12 @@ mod tests {
         bridge.queue_progress(MOCK_PROGRESS);
         scheduler.poll(&mut bridge);
 
-          // Assert - both txs in checked.
+        // Assert - both txs in checked.
         assert_eq!(scheduler.checked_tx.len(), 2);
 
-          // TX A should have higher priority due to fee emphasis.
+        // TX A should have higher priority due to fee emphasis.
         let highest = *scheduler.checked_tx.last().unwrap();
         let lowest = *scheduler.checked_tx.first().unwrap();
         assert!(highest.priority > lowest.priority);
-      }
+    }
 }

@@ -1473,7 +1473,8 @@ mod tests {
             bundle_capacity: 16,
             runtime: RuntimeConfig::default(),
         };
-        let scheduler = BatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
+        let scheduler =
+            BatchScheduler::new_with_jito(CancellationToken::new(), None, args, jito_rx);
 
         (scheduler, jito_tx)
     }

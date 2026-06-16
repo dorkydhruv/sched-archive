@@ -14,12 +14,12 @@
 //! - Weights are configurable; default both are 1 (equal weight)
 
 use {
+    agave_feature_set::FeatureSet,
     agave_transaction_view::transaction_view::SanitizedTransactionView, serde::Deserialize,
     solana_compute_budget_instruction::compute_budget_instruction_details,
     solana_cost_model::cost_model::CostModel,
     solana_runtime_transaction::runtime_transaction::RuntimeTransaction,
     solana_transaction::sanitized::MessageHash,
-    agave_feature_set::FeatureSet,
 };
 
 /// Configuration for the tighter-batch composite scoring strategy.

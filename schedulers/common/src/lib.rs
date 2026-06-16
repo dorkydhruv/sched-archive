@@ -1,11 +1,11 @@
 pub mod events;
 mod interval_stream;
 pub mod jito;
-pub mod tighter_batch;
 mod shared;
+pub mod tighter_batch;
 pub use interval_stream::IntervalStream;
-pub use tighter_batch::tighter_batch_priority;
 pub use shared::PriorityId;
+pub use tighter_batch::tighter_batch_priority;
 
 use agave_scheduling_utils::{bridge::RuntimeState, transaction_ptr::TransactionPtr};
 use agave_transaction_view::transaction_view::SanitizedTransactionView;

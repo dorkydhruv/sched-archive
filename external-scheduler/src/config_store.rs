@@ -49,11 +49,11 @@ pub struct TighterBatchSchedulerConfigData {
     pub keypair_path: String,
     pub tip: TipDistributionConfigData,
     pub jito: JitoConfigData,
-     // Scoring weights for composite value-score
+    // Scoring weights for composite value-score
     pub weight_fee: u64,
     pub weight_efficiency: u64,
     pub min_score: u64,
-     // Runtime-tunable params (not persisted, updated via UI)
+    // Runtime-tunable params (not persisted, updated via UI)
     pub unchecked_capacity: usize,
     pub checked_capacity: usize,
     pub bundle_capacity: usize,
@@ -79,8 +79,8 @@ impl Default for TighterBatchSchedulerConfigData {
             max_check_batches: 4,
             bundle_expiry_ms: 200,
             progress_timeout_sec: 5,
-         }
-     }
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
