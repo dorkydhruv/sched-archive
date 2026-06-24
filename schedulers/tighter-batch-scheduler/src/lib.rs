@@ -3279,6 +3279,7 @@ mod tests {
             scheduler.unchecked_tx.len()
         );
         // Complete the new TX's check.
+        eprintln!("DEBUG: new TX priority={}", scheduler.unchecked_tx.clone().into_iter().last().map(|t| t.priority).unwrap_or(u64::MAX));
         bridge.queue_all_checks_ok();
         bridge.queue_progress(MOCK_PROGRESS);
         scheduler.poll(&mut bridge);
@@ -3293,6 +3294,7 @@ mod tests {
 
         // Assert - new minimum has higher priority than the evicted TX.
         let new_min = scheduler.checked_tx.first().unwrap();
+        eprintln!("DEBUG: new_min.priority={}, lowest.priority={}", new_min.priority, lowest_debug.priority);
         assert!(new_min.priority > lowest.priority);
     }
 
