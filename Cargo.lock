@@ -60,6 +60,7 @@ version = "0.1.0"
 dependencies = [
  "agave-scheduler-bindings",
  "agave-scheduling-utils",
+ "auction-batch-scheduler",
  "axum 0.8.9",
  "batch-scheduler",
  "clap",
@@ -70,7 +71,6 @@ dependencies = [
  "serde_with",
  "solana-keypair",
  "solana-pubkey 3.0.0",
- "tighter-batch-scheduler",
  "tokio",
  "tokio-util",
  "toml",
@@ -322,6 +322,55 @@ name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
+
+[[package]]
+name = "atomic_float"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "628d228f918ac3b82fe590352cc719d30664a0c13ca3a60266fe02c7132d480a"
+
+[[package]]
+name = "auction-batch-scheduler"
+version = "0.1.0"
+dependencies = [
+ "agave-scheduler-bindings",
+ "agave-scheduling-utils",
+ "agave-transaction-view",
+ "arrayref",
+ "borsh",
+ "crossbeam-channel",
+ "eyre",
+ "futures",
+ "indexmap 2.14.0",
+ "jito-protos",
+ "metrics",
+ "min-max-heap",
+ "schedulers",
+ "solana-clock",
+ "solana-compute-budget-instruction",
+ "solana-compute-budget-interface",
+ "solana-cost-model",
+ "solana-fee",
+ "solana-fee-structure",
+ "solana-hash 3.1.0",
+ "solana-keypair",
+ "solana-message 3.1.0",
+ "solana-packet 3.0.0",
+ "solana-pubkey 3.0.0",
+ "solana-pubsub-client",
+ "solana-rpc-client",
+ "solana-rpc-client-types",
+ "solana-runtime-transaction",
+ "solana-sdk-ids",
+ "solana-svm-transaction",
+ "solana-transaction 4.1.1",
+ "static_assertions",
+ "tokio",
+ "tokio-util",
+ "tonic",
+ "tracing",
+ "wincode",
+]
 
 [[package]]
 name = "autocfg"
@@ -3088,6 +3137,7 @@ dependencies = [
  "agave-scheduling-utils",
  "agave-transaction-view",
  "arrayref",
+ "atomic_float",
  "borsh",
  "chrono",
  "crossbeam-channel",
@@ -5495,49 +5545,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
 dependencies = [
  "num_cpus",
-]
-
-[[package]]
-name = "tighter-batch-scheduler"
-version = "0.1.0"
-dependencies = [
- "agave-scheduler-bindings",
- "agave-scheduling-utils",
- "agave-transaction-view",
- "arrayref",
- "borsh",
- "crossbeam-channel",
- "eyre",
- "futures",
- "indexmap 2.14.0",
- "jito-protos",
- "metrics",
- "min-max-heap",
- "schedulers",
- "solana-clock",
- "solana-compute-budget-instruction",
- "solana-compute-budget-interface",
- "solana-cost-model",
- "solana-fee",
- "solana-fee-structure",
- "solana-hash 3.1.0",
- "solana-keypair",
- "solana-message 3.1.0",
- "solana-packet 3.0.0",
- "solana-pubkey 3.0.0",
- "solana-pubsub-client",
- "solana-rpc-client",
- "solana-rpc-client-types",
- "solana-runtime-transaction",
- "solana-sdk-ids",
- "solana-svm-transaction",
- "solana-transaction 4.1.1",
- "static_assertions",
- "tokio",
- "tokio-util",
- "tonic",
- "tracing",
- "wincode",
 ]
 
 [[package]]

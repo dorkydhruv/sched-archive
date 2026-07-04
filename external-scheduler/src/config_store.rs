@@ -41,19 +41,14 @@ impl Default for ConfigData {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub enum SchedulerConfigData {
     BatchScheduler(BatchSchedulerConfigData),
-    TighterBatchScheduler(TighterBatchSchedulerConfigData),
+    AuctionBatchScheduler(AuctionBatchSchedulerConfigData),
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct TighterBatchSchedulerConfigData {
+pub struct AuctionBatchSchedulerConfigData {
     pub keypair_path: String,
     pub tip: TipDistributionConfigData,
     pub jito: JitoConfigData,
-    // Scoring weights for composite value-score
-    pub weight_fee: u64,
-    pub weight_efficiency: u64,
-    pub min_score: u64,
-    // Runtime-tunable params (not persisted, updated via UI)
     pub unchecked_capacity: usize,
     pub checked_capacity: usize,
     pub bundle_capacity: usize,
@@ -61,17 +56,20 @@ pub struct TighterBatchSchedulerConfigData {
     pub max_check_batches: u8,
     pub bundle_expiry_ms: u64,
     pub progress_timeout_sec: u64,
+    pub scoring: Option<AuctionBatchScoringConfig>,
 }
 
-impl Default for TighterBatchSchedulerConfigData {
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct AuctionBatchScoringConfig {
+    pub min_score: u64,
+}
+
+impl Default for AuctionBatchSchedulerConfigData {
     fn default() -> Self {
         Self {
             keypair_path: String::new(),
             tip: TipDistributionConfigData::default(),
             jito: JitoConfigData::default(),
-            weight_fee: 1,
-            weight_efficiency: 1,
-            min_score: 0,
             unchecked_capacity: 64 * 1024,
             checked_capacity: 64 * 1024,
             bundle_capacity: 1024,
@@ -79,6 +77,7 @@ impl Default for TighterBatchSchedulerConfigData {
             max_check_batches: 4,
             bundle_expiry_ms: 200,
             progress_timeout_sec: 5,
+            scoring: None,
         }
     }
 }
@@ -152,10 +151,10 @@ impl Default for JitoConfigData {
 impl ConfigStore {
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let contents = fs::read_to_string(path)?;
-        let file_config: FileConfigData = toml::from_str(&contents)?;
+        let file_config: ConfigData = toml::from_str(&contents)?;
 
         Ok(Self {
-            inner: Arc::new(RwLock::new(file_config.into())),
+            inner: Arc::new(RwLock::new(file_config)),
         })
     }
 
@@ -164,23 +163,7 @@ impl ConfigStore {
     }
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct FileConfigData {
-    #[serde(default)]
-    logs_server: Vec<String>,
-    #[serde(default)]
-    filter_keys: HashSet<Pubkey>,
-    scheduler: FileSchedulerConfigData,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct FileSchedulerConfigData {
-    #[serde(rename = "Batch")]
-    batch: FileBatchSchedulerConfigData,
-    #[serde(rename = "TighterBatch")]
-    tighter_batch: FileTighterBatchSchedulerConfigData,
-}
-
+#[allow(dead_code)]
 #[derive(Debug, serde::Deserialize)]
 struct FileBatchSchedulerConfigData {
     keypair_path: String,
@@ -202,116 +185,52 @@ struct FileBatchSchedulerConfigData {
     progress_timeout_sec: u64,
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct FileTighterBatchSchedulerConfigData {
-    keypair_path: String,
-    tip: TipDistributionConfigData,
-    jito: JitoConfigData,
-    #[serde(default = "default_weight_fee")]
-    weight_fee: u64,
-    #[serde(default = "default_weight_efficiency")]
-    weight_efficiency: u64,
-    #[serde(default = "default_min_score")]
-    min_score: u64,
-    #[serde(default = "default_unchecked_capacity")]
-    unchecked_capacity: usize,
-    #[serde(default = "default_checked_capacity")]
-    checked_capacity: usize,
-    #[serde(default = "default_bundle_capacity")]
-    bundle_capacity: usize,
-    #[serde(default = "default_block_fill_cutoff")]
-    block_fill_cutoff: u8,
-    #[serde(default = "default_max_check_batches")]
-    max_check_batches: u8,
-    #[serde(default = "default_bundle_expiry_ms")]
-    bundle_expiry_ms: u64,
-    #[serde(default = "default_progress_timeout_sec")]
-    progress_timeout_sec: u64,
-}
-
-impl From<FileConfigData> for ConfigData {
-    fn from(file_config: FileConfigData) -> Self {
-        Self {
-            logs_server: file_config.logs_server,
-            filter_keys: file_config.filter_keys,
-            scheduler: SchedulerConfigData::BatchScheduler(file_config.scheduler.batch.into()),
-        }
-    }
-}
-
-impl From<FileBatchSchedulerConfigData> for BatchSchedulerConfigData {
-    fn from(file_config: FileBatchSchedulerConfigData) -> Self {
-        Self {
-            keypair_path: file_config.keypair_path,
-            tip: file_config.tip,
-            jito: file_config.jito,
-            unchecked_capacity: file_config.unchecked_capacity,
-            checked_capacity: file_config.checked_capacity,
-            bundle_capacity: file_config.bundle_capacity,
-            block_fill_cutoff: file_config.block_fill_cutoff,
-            max_check_batches: file_config.max_check_batches,
-            bundle_expiry_ms: file_config.bundle_expiry_ms,
-            progress_timeout_sec: file_config.progress_timeout_sec,
-        }
-    }
-}
-
-impl From<FileTighterBatchSchedulerConfigData> for TighterBatchSchedulerConfigData {
-    fn from(file_config: FileTighterBatchSchedulerConfigData) -> Self {
-        Self {
-            keypair_path: file_config.keypair_path,
-            tip: file_config.tip,
-            jito: file_config.jito,
-            weight_fee: file_config.weight_fee,
-            weight_efficiency: file_config.weight_efficiency,
-            min_score: file_config.min_score,
-            unchecked_capacity: file_config.unchecked_capacity,
-            checked_capacity: file_config.checked_capacity,
-            bundle_capacity: file_config.bundle_capacity,
-            block_fill_cutoff: file_config.block_fill_cutoff,
-            max_check_batches: file_config.max_check_batches,
-            bundle_expiry_ms: file_config.bundle_expiry_ms,
-            progress_timeout_sec: file_config.progress_timeout_sec,
-        }
-    }
-}
-
+#[allow(dead_code)]
 fn default_unchecked_capacity() -> usize {
     64 * 1024
 }
 
+#[allow(dead_code)]
 fn default_checked_capacity() -> usize {
     64 * 1024
 }
 
+#[allow(dead_code)]
 fn default_bundle_capacity() -> usize {
     1024
 }
 
+#[allow(dead_code)]
 fn default_block_fill_cutoff() -> u8 {
     20
 }
 
+#[allow(dead_code)]
 fn default_max_check_batches() -> u8 {
     4
 }
 
+#[allow(dead_code)]
 fn default_bundle_expiry_ms() -> u64 {
     200
 }
 
+#[allow(dead_code)]
 fn default_progress_timeout_sec() -> u64 {
     5
 }
 
+#[allow(dead_code)]
 fn default_weight_fee() -> u64 {
     1
 }
 
+#[allow(dead_code)]
 fn default_weight_efficiency() -> u64 {
     1
 }
 
+#[allow(dead_code)]
 fn default_min_score() -> u64 {
     0
 }

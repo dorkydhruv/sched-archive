@@ -1,5 +1,5 @@
 [workspace]
-members = ["external-scheduler", "jito-protos", "schedulers/batch-scheduler", "schedulers/common", "schedulers/tighter-batch-scheduler"]
+members = ["external-scheduler", "jito-protos", "schedulers/batch-scheduler", "schedulers/common", "schedulers/auction-batch-scheduler"]
 resolver = "2"
 
 [workspace.package]
@@ -28,7 +28,7 @@ incremental = false
 [workspace.dependencies]
 agave-feature-set = { git = "https://github.com/anza-xyz/agave" }
 batch-scheduler.path = "./schedulers/batch-scheduler"
-tighter-batch-scheduler.path = "./schedulers/tighter-batch-scheduler"
+auction-batch-scheduler.path = "./schedulers/auction-batch-scheduler"
 agave-scheduler-bindings = { git = "https://github.com/anza-xyz/agave" }
 schedulers.path = "./schedulers/common"
 agave-scheduling-utils = { git = "https://github.com/anza-xyz/agave" }

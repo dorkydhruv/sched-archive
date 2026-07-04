@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::config_store::{ConfigStore, SchedulerConfigData};
 use agave_scheduling_utils::bridge::SchedulerBindingsBridge;
 use agave_scheduling_utils::handshake::{ClientLogon, client};
+use auction_batch_scheduler::{AuctionBatchScheduler, AuctionBatchSchedulerArgs};
 use batch_scheduler::{BatchScheduler, BatchSchedulerArgs};
 use futures::{StreamExt, stream::FuturesUnordered};
 use schedulers::PriorityId;
@@ -14,7 +15,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle as StdJoinHandle;
 use std::{path::PathBuf, time::Duration};
-use tighter_batch_scheduler::{TighterBatchScheduler, TighterBatchSchedulerArgs};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle as TokioJoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -116,13 +116,13 @@ impl SchedulerThread {
                 threads.push(jito_thread);
             }
             // add more schedulers here as needed
-            SchedulerConfigData::TighterBatchScheduler(tighter_batch) => {
+            SchedulerConfigData::AuctionBatchScheduler(tighter_batch) => {
                 let keypair =
                     Arc::new(Keypair::read_from_file(&tighter_batch.keypair_path).unwrap());
-                let (scheduler, jito_thread) = TighterBatchScheduler::new(
+                let (scheduler, jito_thread) = AuctionBatchScheduler::new(
                     shutdown.clone(),
                     events,
-                    TighterBatchSchedulerArgs {
+                    AuctionBatchSchedulerArgs {
                         tip: TipDistributionArgs {
                             vote_account: Pubkey::from_str(&tighter_batch.tip.vote_account)
                                 .unwrap(),
@@ -140,12 +140,7 @@ impl SchedulerThread {
                         unchecked_capacity: tighter_batch.unchecked_capacity,
                         checked_capacity: tighter_batch.checked_capacity,
                         bundle_capacity: tighter_batch.bundle_capacity,
-                        scoring: schedulers::tighter_batch::TighterBatchConfig {
-                            weight_fee: tighter_batch.weight_fee,
-                            weight_efficiency: tighter_batch.weight_efficiency,
-                            min_score: tighter_batch.min_score,
-                        },
-                        runtime: tighter_batch_scheduler::RuntimeConfig {
+                        runtime: auction_batch_scheduler::RuntimeConfig {
                             max_check_batches: tighter_batch.max_check_batches as usize,
                             block_fill_cutoff: tighter_batch.block_fill_cutoff,
                             progress_timeout: Duration::from_secs(
@@ -153,6 +148,12 @@ impl SchedulerThread {
                             ),
                             bundle_expiry: Duration::from_millis(tighter_batch.bundle_expiry_ms),
                         },
+                        scoring: tighter_batch
+                            .scoring
+                            .map(|s| auction_batch_scheduler::AuctionBatchConfig {
+                                min_score: s.min_score,
+                            })
+                            .unwrap_or_default(),
                     },
                 );
 
@@ -292,7 +293,7 @@ impl Scheduler for BatchScheduler {
     }
 }
 
-impl Scheduler for TighterBatchScheduler {
+impl Scheduler for AuctionBatchScheduler {
     type Meta = PriorityId;
 
     fn poll(
@@ -303,7 +304,7 @@ impl Scheduler for TighterBatchScheduler {
         // Read runtime config from the shared store each poll cycle (synchronous, no block_on needed)
         let runtime_config = config_store.read();
         // Apply runtime-tunable config updates to the scheduler
-        if let SchedulerConfigData::TighterBatchScheduler(tighter_config) =
+        if let SchedulerConfigData::AuctionBatchScheduler(tighter_config) =
             &runtime_config.scheduler
         {
             self.set_runtime_config(

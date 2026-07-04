@@ -46,6 +46,7 @@ solana-svm-transaction.workspace = true
 static_assertions.workspace = true
 tokio-util.workspace = true
 tonic = { workspace = true, features = ["tls", "tls-roots"] }
+atomic_float = "1.1.0"
 
 [dev-dependencies]
 wincode.workspace = true

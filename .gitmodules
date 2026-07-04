@@ -1,7 +1,6 @@
 [submodule "agave"]
 	path = agave
-	url = https://github.com/dotslashapaar/agave.git
-	branch = colo
+	url = https://github.com/anza-xyz/agave.git
 [submodule "jito-protos/protos"]
 	path = jito-protos/protos
 	url = https://github.com/jito-labs/mev-protos.git

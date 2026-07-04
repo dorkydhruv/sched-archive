@@ -1,5 +1,5 @@
 [package]
-name = "tighter-batch-scheduler"
+name = "auction-batch-scheduler"
 version.workspace = true
 edition.workspace = true
 
