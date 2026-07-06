@@ -187,7 +187,7 @@ impl LockManager {
     ///
     /// Formula: `(sum(queue_depths) * AVG_EXEC_MS_PER_TX) / MAX_SLOT_MS`
     pub fn serialization_penalty(&self, tx_locks: &[(Pubkey, bool)]) -> f64 {
-        let avg_exec_ms = 0.075;
+        let avg_exec_ms = 25.0;
         let max_slot_ms = 400.0;
 
         let queue_depth_sum: f64 = tx_locks
@@ -322,6 +322,22 @@ pub struct AuctionEngine {
 }
 
 impl AuctionEngine {
+    /// Update the base prices dynamically.
+    pub fn update_base_prices(
+        &mut self,
+        base_cu: f64,
+        base_write_lock: f64,
+        base_read_lock: f64,
+        base_time: f64,
+        base_space: f64,
+    ) {
+        self.prices.base_cu_price = base_cu;
+        self.prices.base_write_lock_price = base_write_lock;
+        self.prices.base_read_lock_price = base_read_lock;
+        self.prices.base_time_price = base_time;
+        self.prices.base_space_price = base_space;
+    }
+
     /// Create a new auction engine with the given configuration.
     pub fn new(config: AuctionEngineConfig, max_block_cu: u64) -> Self {
         Self {
@@ -541,10 +557,6 @@ impl AuctionEngine {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Resource pricing
-// ---------------------------------------------------------------------------
-
 /// Minimum and maximum price bounds.
 pub const MIN_PRICE: f64 = 0.001;
 pub const MAX_PRICE: f64 = 10.0;
@@ -715,10 +727,6 @@ impl ResourcePrices {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Opportunity entropy
-// ---------------------------------------------------------------------------
-
 /// Tracks opportunity entropy for diversity in batch construction.
 #[derive(Debug, Clone)]
 pub struct OpportunityEntropy {
@@ -765,10 +773,6 @@ impl OpportunityEntropy {
         self.entropy = 0.0;
     }
 }
-
-// ---------------------------------------------------------------------------
-// CU allocation
-// ---------------------------------------------------------------------------
 
 /// Manages CU allocation between committed and tentative allocations.
 #[derive(Debug, Clone)]
@@ -841,10 +845,6 @@ impl CUAllocation {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Transaction candidate & batch
-// ---------------------------------------------------------------------------
-
 /// A candidate transaction for batch inclusion.
 #[derive(Debug, Clone)]
 pub struct TransactionCandidate {
@@ -914,10 +914,6 @@ impl TransactionBatch {
         self.transactions.is_empty()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Batch scorer
-// ---------------------------------------------------------------------------
 
 /// Configuration for batch scoring.
 #[derive(Debug, Clone)]

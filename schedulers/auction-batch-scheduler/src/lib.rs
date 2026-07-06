@@ -119,9 +119,9 @@ pub struct AuctionBatchScheduler {
     tip_config: Option<TipConfig>,
     recent_blockhash: Hash,
     bundles: BTreeSet<BundleId>,
-    unchecked_tx: MinMaxHeap<PriorityId>,
-    checked_tx: BTreeSet<PriorityId>,
-    executing_tx: HashSet<TransactionKey>,
+    pub unchecked_tx: MinMaxHeap<PriorityId>,
+    pub checked_tx: BTreeSet<PriorityId>,
+    pub executing_tx: HashSet<TransactionKey>,
     deferred_tx: IndexSet<PriorityId>,
     next_recheck: Option<PriorityId>,
     in_flight_cus: u64,
@@ -159,7 +159,7 @@ impl AuctionBatchScheduler {
     }
 
     #[must_use]
-    fn new_with_jito(
+    pub fn new_with_jito(
         shutdown: CancellationToken,
         events: Option<EventEmitter>,
         AuctionBatchSchedulerArgs {
@@ -242,6 +242,24 @@ impl AuctionBatchScheduler {
         self.runtime.max_check_batches = max_check_batches;
         self.runtime.bundle_expiry = bundle_expiry;
         self.runtime.progress_timeout = progress_timeout;
+    }
+
+    /// Update the base prices for the internal auction engine dynamically.
+    pub fn update_base_prices(
+        &mut self,
+        base_cu: f64,
+        base_write_lock: f64,
+        base_read_lock: f64,
+        base_time: f64,
+        base_space: f64,
+    ) {
+        self.auction_engine.update_base_prices(
+            base_cu,
+            base_write_lock,
+            base_read_lock,
+            base_time,
+            base_space,
+        );
     }
 
     pub fn poll(&mut self, bridge: &mut SchedulerBindingsBridge<PriorityId>) {
@@ -801,7 +819,7 @@ impl AuctionBatchScheduler {
         {
             let mut pop_next = || {
                 // Prioritize unchecked transactions.
-                if let Some(id) = self.unchecked_tx.pop_min() {
+                if let Some(id) = self.unchecked_tx.pop_max() {
                     return Some(KeyedTransactionMeta {
                         key: id.key,
                         meta: id,
@@ -893,11 +911,15 @@ impl AuctionBatchScheduler {
             match (tx, bundle) {
                 (Some(tx), Some(bundle)) => match tx.cmp(&bundle) {
                     Ordering::Greater | Ordering::Equal => {
-                        self.try_schedule_transaction(&mut budget, bridge, worker);
+                        if !self.try_schedule_transaction(&mut budget, bridge, worker) {
+                            self.try_schedule_bundle(&mut budget, bridge, worker);
+                        }
                     }
                     Ordering::Less => self.try_schedule_bundle(&mut budget, bridge, worker),
                 },
-                (Some(_), None) => self.try_schedule_transaction(&mut budget, bridge, worker),
+                (Some(_), None) => {
+                    self.try_schedule_transaction(&mut budget, bridge, worker);
+                }
                 (None, Some(_)) => self.try_schedule_bundle(&mut budget, bridge, worker),
                 (None, None) => break,
             }
@@ -1141,19 +1163,17 @@ impl AuctionBatchScheduler {
         budget: &mut u64,
         bridge: &mut SchedulerBindingsBridge<PriorityId>,
         worker: usize,
-    ) {
-        let tx = self.checked_tx.last().unwrap();
-
-        // Check if this fits in the budget.
-        if tx.cost > *budget {
-            return;
+    ) -> bool {
+        let mut found_tx = None;
+        for tx in self.checked_tx.iter().rev() {
+            if tx.cost <= *budget && Self::can_lock(&self.auction_engine, bridge, tx.key) {
+                found_tx = Some(*tx);
+                break;
+            }
         }
-
-        // Check if this transaction's read/write locks conflict with any
-        // pre-existing read/write locks.
-        if !Self::can_lock(&self.auction_engine, bridge, tx.key) {
-            return;
-        }
+        let Some(tx) = found_tx else {
+            return false;
+        };
 
         // Acquire locks centrally via auction engine.
         let tx_locks: Vec<(Pubkey, bool)> = bridge
@@ -1162,7 +1182,7 @@ impl AuctionBatchScheduler {
             .map(|(k, v)| (*k, v))
             .collect();
         if !self.auction_engine.acquire_locks(tx.key, &tx_locks) {
-            return;
+            return false;
         }
 
         // Update the auction engine's lock tracker immediately when we lock.
@@ -1170,7 +1190,7 @@ impl AuctionBatchScheduler {
         self.auction_engine.queue_transaction(&tx_locks);
         self.schedule_batch.push(KeyedTransactionMeta {
             key: tx.key,
-            meta: *tx,
+            meta: tx,
         });
 
         // Schedule the batch.
@@ -1186,7 +1206,8 @@ impl AuctionBatchScheduler {
         // Update state.
         *budget -= tx.cost;
         self.in_flight_cus += tx.cost;
-        self.pop_last_checked(bridge).unwrap();
+        assert!(self.remove_checked(bridge, &tx));
+        true
     }
 
     /// Trys to schedule a bundle.
@@ -1390,20 +1411,6 @@ impl AuctionBatchScheduler {
         Some(meta)
     }
 
-    fn pop_last_checked(
-        &mut self,
-        bridge: &SchedulerBindingsBridge<PriorityId>,
-    ) -> Option<PriorityId> {
-        let meta = self.checked_tx.pop_last()?;
-        let tx_locks: Vec<(Pubkey, bool)> = bridge
-            .transaction(meta.key)
-            .locks()
-            .map(|(k, v)| (*k, v))
-            .collect();
-        self.auction_engine.dequeue_transaction(&tx_locks);
-        Some(meta)
-    }
-
     fn calculate_priority(
         &self,
         runtime: &RuntimeState,
@@ -1493,6 +1500,17 @@ impl AuctionBatchScheduler {
         let min_surplus = self.auction_engine.prices().cu.get() * 10.0;
         let surplus = (priority_fee + tip) as f64 - resource_cost * (1.0 - flexibility_discount);
         if surplus <= min_surplus {
+            if priority_fee > 0 {
+                println!(
+                    "DEBUG REJECTED: surplus = {}, min_surplus = {}, priority_fee = {}, resource_cost = {}, cu_price = {}, lock_price = {}",
+                    surplus,
+                    min_surplus,
+                    priority_fee,
+                    resource_cost,
+                    self.auction_engine.prices().cu.get(),
+                    self.auction_engine.prices().lock.get()
+                );
+            }
             return None;
         }
 

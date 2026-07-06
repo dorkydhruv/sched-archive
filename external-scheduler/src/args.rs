@@ -10,12 +10,9 @@ pub(crate) struct Args {
     /// If provided, will write hourly log files to this directory.
     #[clap(long, value_hint = ValueHint::DirPath)]
     pub(crate) logs: Option<PathBuf>,
-    /// Emit metrics via NATS.
+    /// Emit metrics.
     #[clap(long)]
     pub(crate) metrics: bool,
-    /// Port for the web UI config server.
-    #[clap(short = 'p', long, default_value_t = 3000)]
-    pub(crate) port: u16,
     /// Path to scheduler config.
     #[clap(
         short = 'c',

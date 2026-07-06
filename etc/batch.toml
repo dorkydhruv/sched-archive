@@ -1,0 +1,22 @@
+logs_server = "127.0.0.1:9000"
+filter_keys = []
+
+[scheduler.Batch]
+keypair_path = "./agave/test-ledger/validator-keypair.json"
+unchecked_capacity = 65536
+checked_capacity = 65536
+bundle_capacity = 1024
+block_fill_cutoff = 20
+max_check_batches = 4
+bundle_expiry_ms = 200
+progress_timeout_sec = 5
+
+[scheduler.Batch.tip]
+vote_account = "5cJyfCLBfghRtoCuVJNreJgNCStqXLrhHmRhSRYtbgtr"
+merkle_authority = "8F4jGUmxF36vQ6yabnsxX6AQVXdKBhs8kGSUuRKSg8Xt"
+commission_bps = 10000
+
+[scheduler.Batch.jito]
+http_rpc = "http://127.0.0.1:8899"
+ws_rpc = "ws://127.0.0.1:8900"
+block_engine = "https://mainnet.block-engine.jito.wtf"

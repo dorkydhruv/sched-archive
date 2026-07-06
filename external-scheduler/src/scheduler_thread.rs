@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::config_store::{ConfigStore, SchedulerConfigData};
+use crate::config_store::ConfigStore;
 use agave_scheduling_utils::bridge::SchedulerBindingsBridge;
 use agave_scheduling_utils::handshake::{ClientLogon, client};
 use auction_batch_scheduler::{AuctionBatchScheduler, AuctionBatchSchedulerArgs};
@@ -36,37 +36,54 @@ impl SchedulerThread {
     }
 
     async fn setup(args: Args, config_store: ConfigStore, shutdown: CancellationToken) -> Self {
-        // Spawn metrics & events publishers (if NATS is configured).
         let mut threads = Vec::default();
-        // The events publisher is only spawned if NATS is configured, otherwise we just pass None to the schedulers.
-        // We'll worry about this later when we setup the web interface
-        let events = match config_store.read().logs_server.is_empty() {
-            true => None,
-            false => {
-                // let nats_client = Box::leak(Box::new(
-                //     metrics_nats_exporter::async_nats::connect(config.nats_servers)
-                //          .await
-                //          .expect("NATS Client Connect"),
-                //  ));
-                // threads.push(
-                //     metrics_nats_exporter::install(
-                //         shutdown.token.clone(),
-                //         metrics_nats_exporter::Config {
-                //             interval_min: Duration::from_millis(50),
-                //             interval_max: Duration::from_millis(1000),
-                //             metric_prefix: Some(format!("metric.scheduler.{}", config.host_name)),
-                //          },
-                //         nats_client,
-                //      )
-                //      .unwrap(),
-                //  );
-
-                // Spawn events publisher.
+        let events = match &config_store.read().logs_server {
+            None => None,
+            Some(addr) => {
                 let event_ctx = EventContext::new();
-                // The event receiver should be used to generate the analysis over our web server backend
-                let (event_tx, _event_rx) = mpsc::channel(1024);
+                let (event_tx, mut event_rx) = mpsc::channel(1024);
                 let events = EventEmitter::new(event_ctx, event_tx);
-                // threads.push(EventsThread::spawn(event_rx, nats_client, &config.host_name));
+
+                // Spawn TCP event exporter task
+                let addr = addr.clone();
+                let shutdown_token = shutdown.clone();
+                tokio::task::spawn(async move {
+                    loop {
+                        if shutdown_token.is_cancelled() {
+                            break;
+                        }
+                        match tokio::net::TcpStream::connect(&addr).await {
+                            Ok(mut stream) => {
+                                use tokio::io::AsyncWriteExt;
+                                info!("Logs TCP server connected to {}", addr);
+                                while let Some(event) = event_rx.recv().await {
+                                    if shutdown_token.is_cancelled() {
+                                        break;
+                                    }
+                                    let mut data = match serde_json::to_vec(&event) {
+                                        Ok(d) => d,
+                                        Err(e) => {
+                                            error!("Failed to serialize event: {}", e);
+                                            continue;
+                                        }
+                                    };
+                                    data.push(b'\n');
+                                    if let Err(e) = stream.write_all(&data).await {
+                                        error!("TCP stream write error: {}. Reconnecting...", e);
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to connect to logs TCP server at {}: {}. Retrying in 1s...",
+                                    addr, e
+                                );
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                            }
+                        }
+                    }
+                });
 
                 Some(events)
             }
@@ -74,98 +91,91 @@ impl SchedulerThread {
 
         // Load initial config from store (synchronous, no block_on needed).
         let initial_config = config_store.read();
-        match initial_config.scheduler {
-            SchedulerConfigData::BatchScheduler(batch) => {
-                let keypair = Arc::new(Keypair::read_from_file(&batch.keypair_path).unwrap());
-                let (scheduler, jito_thread) = BatchScheduler::new(
-                    shutdown.clone(),
-                    events,
-                    BatchSchedulerArgs {
-                        tip: TipDistributionArgs {
-                            vote_account: Pubkey::from_str(&batch.tip.vote_account).unwrap(),
-                            merkle_authority: Pubkey::from_str(&batch.tip.merkle_authority)
-                                .unwrap(),
-                            commission_bps: batch.tip.commission_bps,
-                        },
-                        jito: JitoArgs {
-                            http_rpc: batch.jito.http_rpc,
-                            ws_rpc: batch.jito.ws_rpc,
-                            block_engine: batch.jito.block_engine,
-                        },
-                        keypair,
-                        filter_keys: initial_config.filter_keys,
-                        unchecked_capacity: batch.unchecked_capacity,
-                        checked_capacity: batch.checked_capacity,
-                        bundle_capacity: batch.bundle_capacity,
-                        runtime: batch_scheduler::RuntimeConfig {
-                            max_check_batches: batch.max_check_batches as usize,
-                            block_fill_cutoff: batch.block_fill_cutoff,
-                            progress_timeout: Duration::from_secs(batch.progress_timeout_sec),
-                            bundle_expiry: Duration::from_millis(batch.bundle_expiry_ms),
-                        },
+        if let Some(auction) = &initial_config.scheduler.auction {
+            let keypair = Arc::new(Keypair::read_from_file(&auction.keypair_path).unwrap());
+            let (scheduler, jito_thread) = AuctionBatchScheduler::new(
+                shutdown.clone(),
+                events,
+                AuctionBatchSchedulerArgs {
+                    tip: TipDistributionArgs {
+                        vote_account: Pubkey::from_str(&auction.tip.vote_account).unwrap(),
+                        merkle_authority: Pubkey::from_str(&auction.tip.merkle_authority).unwrap(),
+                        commission_bps: auction.tip.commission_bps,
                     },
-                );
-
-                threads.push(crate::scheduler_thread::spawn(
-                    shutdown.clone(),
-                    args.bindings_ipc,
-                    config_store.clone(),
-                    scheduler,
-                    5,
-                ));
-                threads.push(jito_thread);
-            }
-            // add more schedulers here as needed
-            SchedulerConfigData::AuctionBatchScheduler(tighter_batch) => {
-                let keypair =
-                    Arc::new(Keypair::read_from_file(&tighter_batch.keypair_path).unwrap());
-                let (scheduler, jito_thread) = AuctionBatchScheduler::new(
-                    shutdown.clone(),
-                    events,
-                    AuctionBatchSchedulerArgs {
-                        tip: TipDistributionArgs {
-                            vote_account: Pubkey::from_str(&tighter_batch.tip.vote_account)
-                                .unwrap(),
-                            merkle_authority: Pubkey::from_str(&tighter_batch.tip.merkle_authority)
-                                .unwrap(),
-                            commission_bps: tighter_batch.tip.commission_bps,
-                        },
-                        jito: JitoArgs {
-                            http_rpc: tighter_batch.jito.http_rpc,
-                            ws_rpc: tighter_batch.jito.ws_rpc,
-                            block_engine: tighter_batch.jito.block_engine,
-                        },
-                        keypair,
-                        filter_keys: initial_config.filter_keys,
-                        unchecked_capacity: tighter_batch.unchecked_capacity,
-                        checked_capacity: tighter_batch.checked_capacity,
-                        bundle_capacity: tighter_batch.bundle_capacity,
-                        runtime: auction_batch_scheduler::RuntimeConfig {
-                            max_check_batches: tighter_batch.max_check_batches as usize,
-                            block_fill_cutoff: tighter_batch.block_fill_cutoff,
-                            progress_timeout: Duration::from_secs(
-                                tighter_batch.progress_timeout_sec,
-                            ),
-                            bundle_expiry: Duration::from_millis(tighter_batch.bundle_expiry_ms),
-                        },
-                        scoring: tighter_batch
-                            .scoring
-                            .map(|s| auction_batch_scheduler::AuctionBatchConfig {
-                                min_score: s.min_score,
-                            })
-                            .unwrap_or_default(),
+                    jito: JitoArgs {
+                        http_rpc: auction.jito.http_rpc.clone(),
+                        ws_rpc: auction.jito.ws_rpc.clone(),
+                        block_engine: auction.jito.block_engine.clone(),
                     },
-                );
+                    keypair,
+                    filter_keys: initial_config.filter_keys,
+                    unchecked_capacity: auction.unchecked_capacity,
+                    checked_capacity: auction.checked_capacity,
+                    bundle_capacity: auction.bundle_capacity,
+                    runtime: auction_batch_scheduler::RuntimeConfig {
+                        max_check_batches: auction.max_check_batches as usize,
+                        block_fill_cutoff: auction.block_fill_cutoff,
+                        progress_timeout: Duration::from_secs(auction.progress_timeout_sec),
+                        bundle_expiry: Duration::from_millis(auction.bundle_expiry_ms),
+                    },
+                    scoring: auction
+                        .scoring
+                        .as_ref()
+                        .map(|s| auction_batch_scheduler::AuctionBatchConfig {
+                            min_score: s.min_score,
+                        })
+                        .unwrap_or_default(),
+                },
+            );
 
-                threads.push(crate::scheduler_thread::spawn(
-                    shutdown.clone(),
-                    args.bindings_ipc,
-                    config_store.clone(),
-                    scheduler,
-                    5,
-                ));
-                threads.push(jito_thread);
-            }
+            threads.push(crate::scheduler_thread::spawn(
+                shutdown.clone(),
+                args.bindings_ipc,
+                config_store.clone(),
+                scheduler,
+                5,
+            ));
+            threads.push(jito_thread);
+        } else if let Some(batch) = &initial_config.scheduler.batch {
+            let keypair = Arc::new(Keypair::read_from_file(&batch.keypair_path).unwrap());
+            let (scheduler, jito_thread) = BatchScheduler::new(
+                shutdown.clone(),
+                events,
+                BatchSchedulerArgs {
+                    tip: TipDistributionArgs {
+                        vote_account: Pubkey::from_str(&batch.tip.vote_account).unwrap(),
+                        merkle_authority: Pubkey::from_str(&batch.tip.merkle_authority).unwrap(),
+                        commission_bps: batch.tip.commission_bps,
+                    },
+                    jito: JitoArgs {
+                        http_rpc: batch.jito.http_rpc.clone(),
+                        ws_rpc: batch.jito.ws_rpc.clone(),
+                        block_engine: batch.jito.block_engine.clone(),
+                    },
+                    keypair,
+                    filter_keys: initial_config.filter_keys,
+                    unchecked_capacity: batch.unchecked_capacity,
+                    checked_capacity: batch.checked_capacity,
+                    bundle_capacity: batch.bundle_capacity,
+                    runtime: batch_scheduler::RuntimeConfig {
+                        max_check_batches: batch.max_check_batches as usize,
+                        block_fill_cutoff: batch.block_fill_cutoff,
+                        progress_timeout: Duration::from_secs(batch.progress_timeout_sec),
+                        bundle_expiry: Duration::from_millis(batch.bundle_expiry_ms),
+                    },
+                },
+            );
+
+            threads.push(crate::scheduler_thread::spawn(
+                shutdown.clone(),
+                args.bindings_ipc,
+                config_store.clone(),
+                scheduler,
+                5,
+            ));
+            threads.push(jito_thread);
+        } else {
+            panic!("No scheduler configuration found (either Batch or Auction must be present)");
         }
 
         // Use tokio to listen on all thread exits concurrently.
@@ -277,7 +287,7 @@ impl Scheduler for BatchScheduler {
         // Read runtime config from the shared store each poll cycle (synchronous, no block_on needed)
         let runtime_config = config_store.read();
         // Apply runtime-tunable config updates to the scheduler
-        if let SchedulerConfigData::BatchScheduler(batch_config) = &runtime_config.scheduler {
+        if let Some(batch_config) = &runtime_config.scheduler.batch {
             self.set_runtime_config(
                 batch_config.unchecked_capacity,
                 batch_config.checked_capacity,
@@ -304,17 +314,15 @@ impl Scheduler for AuctionBatchScheduler {
         // Read runtime config from the shared store each poll cycle (synchronous, no block_on needed)
         let runtime_config = config_store.read();
         // Apply runtime-tunable config updates to the scheduler
-        if let SchedulerConfigData::AuctionBatchScheduler(tighter_config) =
-            &runtime_config.scheduler
-        {
+        if let Some(auction_config) = &runtime_config.scheduler.auction {
             self.set_runtime_config(
-                tighter_config.unchecked_capacity,
-                tighter_config.checked_capacity,
-                tighter_config.bundle_capacity,
-                tighter_config.block_fill_cutoff,
-                tighter_config.max_check_batches as usize,
-                Duration::from_millis(tighter_config.bundle_expiry_ms),
-                Duration::from_secs(tighter_config.progress_timeout_sec),
+                auction_config.unchecked_capacity,
+                auction_config.checked_capacity,
+                auction_config.bundle_capacity,
+                auction_config.block_fill_cutoff,
+                auction_config.max_check_batches as usize,
+                Duration::from_millis(auction_config.bundle_expiry_ms),
+                Duration::from_secs(auction_config.progress_timeout_sec),
             );
         }
 

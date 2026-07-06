@@ -23,25 +23,27 @@ impl Default for ConfigStore {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ConfigData {
     #[serde(default)]
-    pub logs_server: Vec<String>,
+    pub logs_server: Option<String>,
     pub filter_keys: HashSet<Pubkey>,
-    pub scheduler: SchedulerConfigData,
+    pub scheduler: SchedulerConfig,
 }
 
 impl Default for ConfigData {
     fn default() -> Self {
         Self {
-            logs_server: Vec::new(),
+            logs_server: None,
             filter_keys: HashSet::new(),
-            scheduler: SchedulerConfigData::BatchScheduler(BatchSchedulerConfigData::default()),
+            scheduler: SchedulerConfig::default(),
         }
     }
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-pub enum SchedulerConfigData {
-    BatchScheduler(BatchSchedulerConfigData),
-    AuctionBatchScheduler(AuctionBatchSchedulerConfigData),
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+pub struct SchedulerConfig {
+    #[serde(rename = "Batch")]
+    pub batch: Option<BatchSchedulerConfigData>,
+    #[serde(rename = "Auction")]
+    pub auction: Option<AuctionBatchSchedulerConfigData>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

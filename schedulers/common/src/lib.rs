@@ -5,10 +5,10 @@ mod shared;
 pub mod tx_costs;
 
 // IntervalStream and other common utilities.
-pub use interval_stream::IntervalStream;
-pub use shared::PriorityId;
 use agave_scheduling_utils::{bridge::RuntimeState, transaction_ptr::TransactionPtr};
 use agave_transaction_view::transaction_view::SanitizedTransactionView;
+pub use interval_stream::IntervalStream;
+pub use shared::PriorityId;
 use solana_compute_budget_instruction::compute_budget_instruction_details;
 use solana_cost_model::cost_model::CostModel;
 use solana_runtime_transaction::runtime_transaction::RuntimeTransaction;
@@ -18,7 +18,6 @@ pub fn calculate_cost_and_reward(
     runtime: &RuntimeState,
     tx: &SanitizedTransactionView<TransactionPtr>,
 ) -> Option<(u64, u64)> {
-    // Construct runtime transaction.
     let tx = RuntimeTransaction::<&SanitizedTransactionView<TransactionPtr>>::try_new(
         tx,
         MessageHash::Compute,

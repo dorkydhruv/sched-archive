@@ -33,11 +33,6 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let shutdown = CancellationToken::new();
 
     runtime.block_on(async move {
-        // let mut server = tokio::spawn(start_server(
-        //     config_store.clone(),
-        //     args.port,
-        //     shutdown.clone(),
-        // ));
         let mut scheduler = tokio::spawn(SchedulerThread::run(
             args,
             config_store.clone(),
@@ -48,7 +43,6 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         tokio::select! {
             _ = wait_for_shutdown_signal() => {
                 shutdown.cancel();
-                // server.abort();
                 scheduler.abort();
 
                 // let _ = server.await;
@@ -56,21 +50,8 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
                 Ok(())
             },
-            // we'll get to the serve later for now.
-            // server_result = &mut server => {
-            //     shutdown.cancel();
-            //     scheduler.abort();
-
-            //     match server_result {
-            //         Ok(Ok(())) => Ok(()),
-            //         Ok(Err(error)) => Err(error),
-            //         Err(join_error) => Err(join_error_to_error(join_error)),
-            //     }
-            // },
             scheduler_result = &mut scheduler => {
                 shutdown.cancel();
-                // server.abort();
-
                 match scheduler_result {
                     Ok(Ok(())) => Ok(()),
                     Ok(Err(panic)) => panic_result_to_error(panic),

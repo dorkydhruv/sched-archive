@@ -24,3 +24,15 @@ solana-keypair.workspace = true
 toml.workspace = true
 axum = { version = "0.8", features = ["json", "form"] }
 tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+
+[dev-dependencies]
+solana-compute-budget-interface = { workspace = true }
+solana-hash = { workspace = true }
+solana-transaction = { workspace = true, features = ["wincode"] }
+crossbeam-channel = { workspace = true }
+wincode = { workspace = true }
+agave-transaction-view = { workspace = true }
+
+[[bench]]
+name = "comparative_bench"
+harness = false

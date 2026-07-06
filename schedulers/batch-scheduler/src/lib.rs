@@ -102,9 +102,9 @@ pub struct BatchScheduler {
     tip_config: Option<TipConfig>,
     recent_blockhash: Hash,
     bundles: BTreeSet<BundleId>,
-    unchecked_tx: MinMaxHeap<PriorityId>,
-    checked_tx: BTreeSet<PriorityId>,
-    executing_tx: HashSet<TransactionKey>,
+    pub unchecked_tx: MinMaxHeap<PriorityId>,
+    pub checked_tx: BTreeSet<PriorityId>,
+    pub executing_tx: HashSet<TransactionKey>,
     deferred_tx: IndexSet<PriorityId>,
     next_recheck: Option<PriorityId>,
     in_flight_cus: u64,
@@ -140,7 +140,7 @@ impl BatchScheduler {
     }
 
     #[must_use]
-    fn new_with_jito(
+    pub fn new_with_jito(
         shutdown: CancellationToken,
         events: Option<EventEmitter>,
         BatchSchedulerArgs {
