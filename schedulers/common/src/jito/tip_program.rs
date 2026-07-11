@@ -7,21 +7,21 @@ use solana_sdk_ids::system_program;
 use solana_transaction::Transaction;
 use solana_transaction::versioned::VersionedTransaction;
 
-pub const TIP_PAYMENT_PROGRAM: Pubkey = pubkey!("T1pyyaTNZsKv2WcRAB8oVnk93mLJw2XzjtVYqCsaHqt");
-pub const TIP_PAYMENT_CONFIG: Pubkey = pubkey!("HgzT81VF1xZ3FT9Eq1pHhea7Wcfq2bv4tWTP3VvJ8Y9D");
+pub const TIP_PAYMENT_PROGRAM: Pubkey = pubkey!("GJHtFqM9agxPmkeKjHny6qiRKrXZALvvFGiKf11QE7hy");
+pub const TIP_PAYMENT_CONFIG: Pubkey = pubkey!("Fw7ncAi94BAU2Muj6bEyc37sMifkoepkbASKEnvYJc9d");
 pub const TIP_ACCOUNTS: [Pubkey; 8] = [
-    pubkey!("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5"),
-    pubkey!("HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe"),
-    pubkey!("Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY"),
-    pubkey!("ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49"),
-    pubkey!("DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh"),
-    pubkey!("ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt"),
-    pubkey!("DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL"),
-    pubkey!("3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"),
+    pubkey!("BkMx5bRzQeP6tUZgzEs3xeDWJfQiLYvNDqSgmGZKYJDq"),
+    pubkey!("CwWZzvRgmxj9WLLhdoWUVrHZ1J8db3w2iptKuAitHqoC"),
+    pubkey!("4uRnem4BfVpZBv7kShVxUYtcipscgZMSHi3B9CSL6gAA"),
+    pubkey!("AzfhMPcx3qjbvCK3UUy868qmc5L451W341cpFqdL3EBe"),
+    pubkey!("84DrGKhycCUGfLzw8hXsUYX9SnWdh2wW3ozsTPrC5xyg"),
+    pubkey!("7aewvu8fMf1DK4fKoMXKfs3h3wpAQ7r7D8T1C71LmMF"),
+    pubkey!("G2d63CEgKBdgtpYT2BuheYQ9HFuFCenuHLNyKVpqAuSD"),
+    pubkey!("F7ThiQUBYiEcyaxpmMuUeACdoiSLKg4SZZ8JSfpFNwAf"),
 ];
 
-const TIP_DISTRIBUTION_PROGRAM: Pubkey = pubkey!("4R3gSG8BpU4t19KYj8CfnbtRpnT8gtk4dvTHxVRwc2r7");
-const TIP_DISTRIBUTION_CONFIG: Pubkey = pubkey!("STGR71TeAeycQUDKzku1GqPQdErQcTcdqxJuQmCjBu6");
+const TIP_DISTRIBUTION_PROGRAM: Pubkey = pubkey!("DzvGET57TAgEDxvm3ERUM4GNcsAJdqjDLCne9sdfY4wf");
+const TIP_DISTRIBUTION_CONFIG: Pubkey = pubkey!("8fFMXTrdEFSGuaZ4p5LkypoXqjjjTJjUCRrPVRwDcBSg");
 
 #[derive(Debug, Clone, Copy)]
 pub struct TipDistributionArgs {
