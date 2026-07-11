@@ -1497,22 +1497,10 @@ impl AuctionBatchScheduler {
 
         // 4. Surplus calculation
         // We want: fee + tip - (cost * (1 - discount)) > threshold
-        let min_surplus = self.auction_engine.prices().cu.get() * 10.0;
         let surplus = (priority_fee + tip) as f64 - resource_cost * (1.0 - flexibility_discount);
-        if surplus <= min_surplus {
-            if priority_fee > 0 {
-                println!(
-                    "DEBUG REJECTED: surplus = {}, min_surplus = {}, priority_fee = {}, resource_cost = {}, cu_price = {}, lock_price = {}",
-                    surplus,
-                    min_surplus,
-                    priority_fee,
-                    resource_cost,
-                    self.auction_engine.prices().cu.get(),
-                    self.auction_engine.prices().lock.get()
-                );
-            }
-            return None;
-        }
+        
+        // Push negative surplus transactions down the queue instead of rejecting them.
+        // We achieve this by letting the scaled priority clamp to 0.
 
         // 5. Scale to priority (safely clamp to prevent float-to-int cast overflow)
         let scaled_surplus = (surplus * PRIORITY_MULTIPLIER as f64 + 1000.0).max(0.0);
@@ -1864,9 +1852,11 @@ mod tests {
         let locks = bridge.transaction(tx_state).locks().map(|(k, v)| (*k, v));
         let low_hot_score = scheduler.score_with_auction(&costs, locks, 0);
         assert!(
-            low_hot_score.is_none(),
-            "Low paying hot transaction should be rejected by serialization penalty"
+            low_hot_score.is_some(),
+            "Low paying hot transaction should be accepted but prioritized at 0 due to congestion penalty"
         );
+        let (priority, _) = low_hot_score.unwrap();
+        assert_eq!(priority, 0);
 
         // 3. Try to ingest a high-paying transaction targeting the hot account (should be accepted)
         let payer_high_hot = Keypair::new();
@@ -1970,9 +1960,11 @@ mod tests {
 
         let score_late = scheduler.score_with_auction(&costs_late, locks_late, 0);
         assert!(
-            score_late.is_none(),
-            "Transaction should be rejected late in the slot due to high time penalty"
+            score_late.is_some(),
+            "Transaction should be accepted late in the slot but prioritized at 0 due to high time penalty"
         );
+        let (priority, _) = score_late.unwrap();
+        assert_eq!(priority, 0);
     }
 
     #[test]
@@ -1998,9 +1990,11 @@ mod tests {
         scheduler.poll(&mut bridge);
         assert_eq!(
             scheduler.bundles.len(),
-            0,
-            "Low paying bundle should be rejected on ingestion"
+            1,
+            "Low paying bundle should be accepted on ingestion but prioritized at 0"
         );
+        let low_bundle = scheduler.bundles.iter().next().unwrap();
+        assert_eq!(low_bundle.priority, 0);
 
         // 2. Queue a high-paying bundle (accepted and stored)
         let tx_high1 = noop_with_budget(&payer1, 25_000, 5000);
@@ -2016,8 +2010,14 @@ mod tests {
         scheduler.poll(&mut bridge);
         assert_eq!(
             scheduler.bundles.len(),
-            1,
-            "High paying bundle should be successfully ingested"
+            2,
+            "Both bundles should be successfully ingested"
         );
+        
+        let mut bundle_iter = scheduler.bundles.iter();
+        let first = bundle_iter.next().unwrap();
+        assert_eq!(first.priority, 0);
+        let second = bundle_iter.next().unwrap();
+        assert!(second.priority > 0, "High paying bundle should have positive priority");
     }
 }

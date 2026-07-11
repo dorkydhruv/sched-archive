@@ -32,7 +32,14 @@ solana-transaction = { workspace = true, features = ["wincode"] }
 crossbeam-channel = { workspace = true }
 wincode = { workspace = true }
 agave-transaction-view = { workspace = true }
+base64 = "0.22"
+nix = "0.31.3"
+shaq = { workspace = true }
 
 [[bench]]
 name = "comparative_bench"
+harness = false
+
+[[bench]]
+name = "replay_bench"
 harness = false

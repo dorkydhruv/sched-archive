@@ -63,14 +63,17 @@ dependencies = [
  "agave-transaction-view",
  "auction-batch-scheduler",
  "axum 0.8.9",
+ "base64 0.22.1",
  "batch-scheduler",
  "clap",
  "crossbeam-channel",
  "futures",
+ "nix",
  "schedulers",
  "serde",
  "serde_json",
  "serde_with",
+ "shaq 1.0.2",
  "solana-compute-budget-interface",
  "solana-hash 3.1.0",
  "solana-keypair",
@@ -130,7 +133,7 @@ dependencies = [
  "libc",
  "nix",
  "rts-alloc",
- "shaq",
+ "shaq 3.0.0",
  "slotmap",
  "solana-fee",
  "solana-pubkey 4.2.0",
@@ -3429,6 +3432,15 @@ checksum = "77fd7028345d415a4034cf8777cd4f8ab1851274233b45f84e3d955502d93874"
 dependencies = [
  "digest 0.10.7",
  "keccak",
+]
+
+[[package]]
+name = "shaq"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7ff8d8358f614b394c8011e4aca6eb9c0bba29bd73d16be593745bd47838cb8"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
