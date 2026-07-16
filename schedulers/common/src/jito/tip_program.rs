@@ -7,18 +7,26 @@ use solana_sdk_ids::system_program;
 use solana_transaction::Transaction;
 use solana_transaction::versioned::VersionedTransaction;
 
+use std::sync::LazyLock;
+
 pub const TIP_PAYMENT_PROGRAM: Pubkey = pubkey!("GJHtFqM9agxPmkeKjHny6qiRKrXZALvvFGiKf11QE7hy");
-pub const TIP_PAYMENT_CONFIG: Pubkey = pubkey!("Fw7ncAi94BAU2Muj6bEyc37sMifkoepkbASKEnvYJc9d");
-pub const TIP_ACCOUNTS: [Pubkey; 8] = [
-    pubkey!("BkMx5bRzQeP6tUZgzEs3xeDWJfQiLYvNDqSgmGZKYJDq"),
-    pubkey!("CwWZzvRgmxj9WLLhdoWUVrHZ1J8db3w2iptKuAitHqoC"),
-    pubkey!("4uRnem4BfVpZBv7kShVxUYtcipscgZMSHi3B9CSL6gAA"),
-    pubkey!("AzfhMPcx3qjbvCK3UUy868qmc5L451W341cpFqdL3EBe"),
-    pubkey!("84DrGKhycCUGfLzw8hXsUYX9SnWdh2wW3ozsTPrC5xyg"),
-    pubkey!("7aewvu8fMf1DK4fKoMXKfs3h3wpAQ7r7D8T1C71LmMF"),
-    pubkey!("G2d63CEgKBdgtpYT2BuheYQ9HFuFCenuHLNyKVpqAuSD"),
-    pubkey!("F7ThiQUBYiEcyaxpmMuUeACdoiSLKg4SZZ8JSfpFNwAf"),
-];
+
+pub static TIP_PAYMENT_CONFIG: LazyLock<Pubkey> =
+    LazyLock::new(|| Pubkey::find_program_address(&[b"CONFIG_ACCOUNT"], &TIP_PAYMENT_PROGRAM).0);
+
+pub static TIP_ACCOUNTS: LazyLock<[Pubkey; 8]> = LazyLock::new(|| {
+    let program_id = TIP_PAYMENT_PROGRAM;
+    [
+        Pubkey::find_program_address(&[b"TIP_ACCOUNT_0"], &program_id).0,
+        Pubkey::find_program_address(&[b"TIP_ACCOUNT_1"], &program_id).0,
+        Pubkey::find_program_address(&[b"TIP_ACCOUNT_2"], &program_id).0,
+        Pubkey::find_program_address(&[b"TIP_ACCOUNT_3"], &program_id).0,
+        Pubkey::find_program_address(&[b"TIP_ACCOUNT_4"], &program_id).0,
+        Pubkey::find_program_address(&[b"TIP_ACCOUNT_5"], &program_id).0,
+        Pubkey::find_program_address(&[b"TIP_ACCOUNT_6"], &program_id).0,
+        Pubkey::find_program_address(&[b"TIP_ACCOUNT_7"], &program_id).0,
+    ]
+});
 
 const TIP_DISTRIBUTION_PROGRAM: Pubkey = pubkey!("DzvGET57TAgEDxvm3ERUM4GNcsAJdqjDLCne9sdfY4wf");
 const TIP_DISTRIBUTION_CONFIG: Pubkey = pubkey!("8fFMXTrdEFSGuaZ4p5LkypoXqjjjTJjUCRrPVRwDcBSg");
@@ -100,7 +108,7 @@ pub fn change_tip_receiver(
         program_id: TIP_PAYMENT_PROGRAM,
         data: [69, 99, 22, 71, 11, 231, 86, 143].to_vec(),
         accounts: vec![
-            AccountMeta::new(TIP_PAYMENT_CONFIG, false),
+            AccountMeta::new(*TIP_PAYMENT_CONFIG, false),
             AccountMeta::new(old_tip_receiver, false),
             AccountMeta::new(new_tip_receiver, false),
             AccountMeta::new(old_block_builder, false),
@@ -123,7 +131,7 @@ pub fn change_tip_receiver(
         program_id: TIP_PAYMENT_PROGRAM,
         data,
         accounts: vec![
-            AccountMeta::new(TIP_PAYMENT_CONFIG, false),
+            AccountMeta::new(*TIP_PAYMENT_CONFIG, false),
             // We just set the tip reciever in prior IX.
             AccountMeta::new(new_tip_receiver, false),
             AccountMeta::new(old_block_builder, false),
@@ -148,4 +156,29 @@ pub fn change_tip_receiver(
     ));
 
     wincode::serialize(&tx).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_derived_keys() {
+        let expected_config = pubkey!("Fw7ncAi94BAU2Muj6bEyc37sMifkoepkbASKEnvYJc9d");
+        let expected_accounts = [
+            pubkey!("AzfhMPcx3qjbvCK3UUy868qmc5L451W341cpFqdL3EBe"), // TIP_ACCOUNT_0
+            pubkey!("BkMx5bRzQeP6tUZgzEs3xeDWJfQiLYvNDqSgmGZKYJDq"), // TIP_ACCOUNT_1
+            pubkey!("G2d63CEgKBdgtpYT2BuheYQ9HFuFCenuHLNyKVpqAuSD"), // TIP_ACCOUNT_2
+            pubkey!("84DrGKhycCUGfLzw8hXsUYX9SnWdh2wW3ozsTPrC5xyg"), // TIP_ACCOUNT_3
+            pubkey!("F7ThiQUBYiEcyaxpmMuUeACdoiSLKg4SZZ8JSfpFNwAf"), // TIP_ACCOUNT_4
+            pubkey!("4uRnem4BfVpZBv7kShVxUYtcipscgZMSHi3B9CSL6gAA"), // TIP_ACCOUNT_5
+            pubkey!("CwWZzvRgmxj9WLLhdoWUVrHZ1J8db3w2iptKuAitHqoC"), // TIP_ACCOUNT_6
+            pubkey!("7aewvu8fMf1DK4fKoMXKfs3h3wpAQ7r7D8T1C71LmMF"),  // TIP_ACCOUNT_7
+        ];
+
+        assert_eq!(*TIP_PAYMENT_CONFIG, expected_config);
+        for i in 0..8 {
+            assert_eq!(TIP_ACCOUNTS[i], expected_accounts[i]);
+        }
+    }
 }

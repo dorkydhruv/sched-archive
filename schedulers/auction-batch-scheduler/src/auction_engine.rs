@@ -185,23 +185,28 @@ impl LockManager {
 
     /// Compute serialization penalty for a transaction.
     ///
-    /// Formula: `(sum(queue_depths) * AVG_EXEC_MS_PER_TX) / MAX_SLOT_MS`
+    /// Uses a mild logarithmic penalty on queued write-lock contention to avoid
+    /// over-penalizing transactions under parallel execution.
     pub fn serialization_penalty(&self, tx_locks: &[(Pubkey, bool)]) -> f64 {
-        let avg_exec_ms = 25.0;
-        let max_slot_ms = 400.0;
-
-        let queue_depth_sum: f64 = tx_locks
+        let write_queue_depth_sum: f64 = tx_locks
             .iter()
+            .filter(|(_, writable)| *writable)
             .map(|(addr, _)| self.queue_depths.get(addr).copied().unwrap_or(0.0))
             .sum();
-
-        let predicted_blocked_ms = queue_depth_sum * avg_exec_ms;
-        (predicted_blocked_ms / max_slot_ms).clamp(0.0, 0.99)
+        (write_queue_depth_sum.ln_1p() * 0.05).clamp(0.0, 0.99)
     }
 
     /// Get total queue depth across all accounts.
     pub fn total_queue_depth(&self) -> f64 {
         self.queue_depths.values().sum()
+    }
+
+    /// Get total queue depth of contending accounts only (depth > 1.0).
+    pub fn total_contention_depth(&self) -> f64 {
+        self.queue_depths
+            .values()
+            .map(|&d| (d - 1.0).max(0.0))
+            .sum()
     }
 
     /// Get queue depth for a specific account.
@@ -256,10 +261,10 @@ pub struct AuctionEngineConfig {
 impl Default for AuctionEngineConfig {
     fn default() -> Self {
         Self {
-            cu_alpha: 0.1,
-            lock_alpha: 0.15,
-            time_alpha: 0.2,
-            space_alpha: 0.05,
+            cu_alpha: 0.5,
+            lock_alpha: 0.5,
+            time_alpha: 0.8,
+            space_alpha: 0.3,
             promote_threshold: 5.0,
             release_threshold: 0.5,
             lock_decay_rate: 0.1,
@@ -711,9 +716,7 @@ impl ResourcePrices {
         let cu_cost = effective_cu * self.cu.get() * self.base_cu_price;
         let write_lock_cost = num_write_locks as f64 * self.lock.get() * self.base_write_lock_price;
         let read_lock_cost = num_read_locks as f64 * self.lock.get() * self.base_read_lock_price;
-        let time_cost = self.time.get() * self.base_time_price;
-        let space_cost = self.space.get() * self.base_space_price;
-        cu_cost + write_lock_cost + read_lock_cost + time_cost + space_cost
+        cu_cost + write_lock_cost + read_lock_cost
     }
 
     /// Reset all prices (call at slot boundary).

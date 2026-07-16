@@ -63,7 +63,7 @@ solana-fee = { git = "https://github.com/anza-xyz/agave" }
 solana-fee-structure = "3.0.0"
 solana-hash = "3.0.1"
 solana-keypair = "3.0.1"
-solana-message = "3.0.1"
+solana-message = "4.1.1"
 solana-packet = "3.0.0"
 solana-pubkey = "3.0.0"
 solana-pubsub-client = "3.0.0"

@@ -1,18 +1,18 @@
 use {
-    agave_scheduling_utils::{
-        bridge::{KeyedTransactionMeta, ScheduleBatch, SchedulerBindingsBridge, TransactionKey},
-        handshake::{client, server::Server, AgaveSession, ClientLogon},
-        responses_region::{execution_responses_from_iter, resolve_responses_from_iter},
-        transaction_ptr::TransactionPtrBatch,
-    },
     agave_scheduler_bindings::{
-        pack_message_flags, processed_codes, worker_message_types::{
-            fee_payer_balance_flags, not_included_reasons, resolve_flags, status_check_flags,
-            CheckResponse, ExecutionResponse,
-        },
         ProgressMessage, SharablePubkeys, SharableTransactionBatchRegion,
         SharableTransactionRegion, TpuToPackMessage, TransactionResponseRegion,
-        WorkerToPackMessage,
+        WorkerToPackMessage, pack_message_flags, processed_codes,
+        worker_message_types::{
+            CheckResponse, ExecutionResponse, fee_payer_balance_flags, not_included_reasons,
+            resolve_flags, status_check_flags,
+        },
+    },
+    agave_scheduling_utils::{
+        bridge::{KeyedTransactionMeta, ScheduleBatch, SchedulerBindingsBridge, TransactionKey},
+        handshake::{AgaveSession, ClientLogon, client, server::Server},
+        responses_region::{execution_responses_from_iter, resolve_responses_from_iter},
+        transaction_ptr::TransactionPtrBatch,
     },
     solana_pubkey::Pubkey,
     solana_transaction::versioned::VersionedTransaction,
@@ -183,7 +183,8 @@ where
         let worker = &mut self.agave.workers[worker_idx];
         let responses_region =
             resolve_responses_from_iter(&worker.allocator, [response].into_iter()).unwrap();
-        self.pending_frees.push((worker_idx, responses_region.transaction_responses_offset));
+        self.pending_frees
+            .push((worker_idx, responses_region.transaction_responses_offset));
 
         let msg = WorkerToPackMessage {
             batch: batch_region,
@@ -218,7 +219,8 @@ where
 
         let responses_region =
             execution_responses_from_iter(&worker.allocator, [response].into_iter()).unwrap();
-        self.pending_frees.push((worker_idx, responses_region.transaction_responses_offset));
+        self.pending_frees
+            .push((worker_idx, responses_region.transaction_responses_offset));
 
         let msg = WorkerToPackMessage {
             batch: batch_region,

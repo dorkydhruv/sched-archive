@@ -43,3 +43,7 @@ harness = false
 [[bench]]
 name = "replay_bench"
 harness = false
+
+[[bench]]
+name = "stress_bench"
+harness = false

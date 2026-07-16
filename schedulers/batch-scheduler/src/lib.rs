@@ -282,12 +282,17 @@ impl BatchScheduler {
         // Drain progress and check for disconnect.
         match bridge.drain_progress() {
             Some(_) => self.last_progress_time = Instant::now(),
-            None => assert!(
-                self.last_progress_time.elapsed() < self.runtime.progress_timeout,
-                "Agave disconnected; elapsed={:?}; slot={}",
-                self.last_progress_time.elapsed(),
-                self.slot,
-            ),
+            None => {
+                let elapsed = self.last_progress_time.elapsed();
+                if elapsed >= self.runtime.progress_timeout {
+                    tracing::warn!(
+                        "Agave progress update slot {} starved for {:?}; daemon is still running",
+                        self.slot,
+                        elapsed
+                    );
+                    self.last_progress_time = Instant::now();
+                }
+            }
         }
 
         // Check for slot roll.
@@ -812,12 +817,22 @@ impl BatchScheduler {
             match (tx, bundle) {
                 (Some(tx), Some(bundle)) => match tx.cmp(&bundle) {
                     Ordering::Greater | Ordering::Equal => {
-                        self.try_schedule_transaction(&mut budget, bridge, worker);
+                        if !self.try_schedule_transaction(&mut budget, bridge, worker) {
+                            self.try_schedule_bundle(&mut budget, bridge, worker);
+                        }
                     }
-                    Ordering::Less => self.try_schedule_bundle(&mut budget, bridge, worker),
+                    Ordering::Less => {
+                        if !self.try_schedule_bundle(&mut budget, bridge, worker) {
+                            self.try_schedule_transaction(&mut budget, bridge, worker);
+                        }
+                    }
                 },
-                (Some(_), None) => self.try_schedule_transaction(&mut budget, bridge, worker),
-                (None, Some(_)) => self.try_schedule_bundle(&mut budget, bridge, worker),
+                (Some(_), None) => {
+                    self.try_schedule_transaction(&mut budget, bridge, worker);
+                }
+                (None, Some(_)) => {
+                    self.try_schedule_bundle(&mut budget, bridge, worker);
+                }
                 (None, None) => break,
             }
 
@@ -1058,30 +1073,38 @@ impl BatchScheduler {
         budget: &mut u64,
         bridge: &mut SchedulerBindingsBridge<PriorityId>,
         worker: usize,
-    ) {
-        let tx = self.checked_tx.last().unwrap();
+    ) -> bool {
+        let max_batch_size = 32;
+        let search_limit = 512;
+        let mut scheduled_txs = Vec::new();
 
-        // Check if this fits in the budget.
-        if tx.cost > *budget {
-            return;
+        for tx in self.checked_tx.iter().rev().take(search_limit) {
+            if scheduled_txs.len() >= max_batch_size {
+                break;
+            }
+            if tx.cost > *budget {
+                continue;
+            }
+            if !Self::can_lock(&self.in_flight_locks, bridge, tx.key) {
+                continue;
+            }
+
+            Self::lock(&mut self.in_flight_locks, bridge, tx.key);
+            *budget -= tx.cost;
+            self.in_flight_cus += tx.cost;
+            scheduled_txs.push(*tx);
         }
 
-        // Check if this transaction's read/write locks conflict with any
-        // pre-existing read/write locks.
-        if !Self::can_lock(&self.in_flight_locks, bridge, tx.key) {
-            return;
+        if scheduled_txs.is_empty() {
+            return false;
         }
 
-        // Insert all the locks.
-        Self::lock(&mut self.in_flight_locks, bridge, tx.key);
+        self.schedule_batch
+            .extend(scheduled_txs.iter().map(|tx| KeyedTransactionMeta {
+                key: tx.key,
+                meta: *tx,
+            }));
 
-        // Build the 1TX batch.
-        self.schedule_batch.push(KeyedTransactionMeta {
-            key: tx.key,
-            meta: *tx,
-        });
-
-        // Schedule the batch.
         bridge
             .schedule(ScheduleBatch {
                 worker,
@@ -1091,10 +1114,11 @@ impl BatchScheduler {
             })
             .unwrap();
 
-        // Update state.
-        *budget -= tx.cost;
-        self.in_flight_cus += tx.cost;
-        self.checked_tx.pop_last().unwrap();
+        for tx in scheduled_txs {
+            assert!(self.checked_tx.remove(&tx));
+        }
+
+        true
     }
 
     /// Trys to schedule a bundle.
@@ -1107,12 +1131,12 @@ impl BatchScheduler {
         budget: &mut u64,
         bridge: &mut SchedulerBindingsBridge<PriorityId>,
         worker: usize,
-    ) {
+    ) -> bool {
         let bundle = self.bundles.last().unwrap();
 
         // Check this fits in budget.
         if bundle.cost > *budget {
-            return;
+            return false;
         }
 
         // See if the bundle can be scheduled without conflicts.
@@ -1121,7 +1145,7 @@ impl BatchScheduler {
             .iter()
             .all(|tx_key| Self::can_lock(&self.in_flight_locks, bridge, *tx_key))
         {
-            return;
+            return false;
         }
 
         // Take all the locks & declare the TXs as executing.
@@ -1166,6 +1190,7 @@ impl BatchScheduler {
         *budget -= bundle.cost;
         self.in_flight_cus += bundle.cost;
         self.bundles.pop_last().unwrap();
+        true
     }
 
     /// Checks a TX for lock conflicts without inserting locks.
@@ -2131,31 +2156,32 @@ mod tests {
         let tip1 = bridge.pop_schedule().unwrap();
         assert_ne!(tip1.flags & pack_message_flags::EXECUTE, 0);
 
-        // First execute batch should be the higher priority TX.
-        let exec_high = bridge.pop_schedule().unwrap();
-        assert_eq!(exec_high.flags, pack_message_flags::EXECUTE);
-        assert_eq!(exec_high.transactions.len(), 1);
+        // User TXs may now be packed into one execute batch; verify global priority order.
+        let exec1 = bridge.pop_schedule().unwrap();
+        assert_eq!(exec1.flags, pack_message_flags::EXECUTE);
+        let mut scheduled_priorities: Vec<u64> = exec1
+            .transactions
+            .iter()
+            .map(|tx| tx.meta.priority)
+            .collect();
+        let mut scheduled_keys: Vec<TransactionKey> =
+            exec1.transactions.iter().map(|tx| tx.key).collect();
 
-        // Second execute batch should be the lower priority TX.
-        let exec_low = bridge.pop_schedule().unwrap();
-        assert_eq!(exec_low.flags, pack_message_flags::EXECUTE);
-        assert_eq!(exec_low.transactions.len(), 1);
+        if scheduled_priorities.len() < 2 {
+            let exec2 = bridge.pop_schedule().unwrap();
+            assert_eq!(exec2.flags, pack_message_flags::EXECUTE);
+            scheduled_priorities.extend(exec2.transactions.iter().map(|tx| tx.meta.priority));
+            scheduled_keys.extend(exec2.transactions.iter().map(|tx| tx.key));
+        }
 
-        // Higher priority TX was scheduled first (higher meta.priority).
-        assert!(exec_high.transactions[0].meta.priority > exec_low.transactions[0].meta.priority);
+        assert_eq!(scheduled_priorities.len(), 2);
+        assert!(scheduled_priorities[0] > scheduled_priorities[1]);
 
         // Both user TXs moved from checked to executing (+ 2 tip TXs).
         assert_eq!(scheduler.checked_tx.len(), 0);
-        assert!(
-            scheduler
-                .executing_tx
-                .contains(&exec_high.transactions[0].key)
-        );
-        assert!(
-            scheduler
-                .executing_tx
-                .contains(&exec_low.transactions[0].key)
-        );
+        for key in scheduled_keys {
+            assert!(scheduler.executing_tx.contains(&key));
+        }
     }
 
     #[test]

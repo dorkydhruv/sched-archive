@@ -328,12 +328,17 @@ impl AuctionBatchScheduler {
         // Drain progress and check for disconnect.
         match bridge.drain_progress() {
             Some(_) => self.last_progress_time = Instant::now(),
-            None => assert!(
-                self.last_progress_time.elapsed() < self.runtime.progress_timeout,
-                "Agave disconnected; elapsed={:?}; slot={}",
-                self.last_progress_time.elapsed(),
-                self.slot,
-            ),
+            None => {
+                let elapsed = self.last_progress_time.elapsed();
+                if elapsed >= self.runtime.progress_timeout {
+                    tracing::warn!(
+                        "Agave progress update slot {} starved for {:?}; daemon is still running",
+                        self.slot,
+                        elapsed
+                    );
+                    self.last_progress_time = Instant::now();
+                }
+            }
         }
 
         // Check for slot roll.
@@ -507,16 +512,19 @@ impl AuctionBatchScheduler {
         // NB: Technically we are evicting more than we need to because not all of
         // `additional` will parse correctly & thus have a priority.
         for _ in 0..shortfall {
-            let id = self.unchecked_tx.pop_min().unwrap();
-            self.emit_tx_event(
-                bridge,
-                id.key,
-                id.priority,
-                TransactionAction::Evict {
-                    reason: EvictReason::UncheckedCapacity,
-                },
-            );
-            bridge.drop_transaction(id.key);
+            if let Some(id) = self.unchecked_tx.pop_min() {
+                self.emit_tx_event(
+                    bridge,
+                    id.key,
+                    id.priority,
+                    TransactionAction::Evict {
+                        reason: EvictReason::UncheckedCapacity,
+                    },
+                );
+                bridge.drop_transaction(id.key);
+            } else {
+                break;
+            }
         }
         self.metrics.recv_tpu_evict.increment(shortfall as u64);
         self.slot_stats.ingest_tpu_evict += shortfall as u64;
@@ -538,24 +546,41 @@ impl AuctionBatchScheduler {
                             return TxDecision::Drop;
                         }
 
-                        self.unchecked_tx.push(PriorityId {
+                        let meta = PriorityId {
                             priority,
                             cost,
                             key,
-                        });
-                        self.emit_tx_event(
-                            bridge,
-                            key,
-                            priority,
-                            TransactionAction::Ingest {
-                                source: TransactionSource::Tpu,
-                                bundle: None,
-                            },
-                        );
-                        self.metrics.recv_tpu_ok.increment(1);
-                        self.slot_stats.ingest_tpu_ok += 1;
+                        };
 
-                        TxDecision::Keep
+                        if bridge.transaction(key).data.num_address_table_lookups() == 0 {
+                            let decision = self.insert_checked_with_capacity(bridge, meta);
+                            self.emit_tx_event(
+                                bridge,
+                                key,
+                                priority,
+                                TransactionAction::Ingest {
+                                    source: TransactionSource::Tpu,
+                                    bundle: None,
+                                },
+                            );
+                            self.metrics.recv_tpu_ok.increment(1);
+                            self.slot_stats.ingest_tpu_ok += 1;
+                            decision
+                        } else {
+                            self.unchecked_tx.push(meta);
+                            self.emit_tx_event(
+                                bridge,
+                                key,
+                                priority,
+                                TransactionAction::Ingest {
+                                    source: TransactionSource::Tpu,
+                                    bundle: None,
+                                },
+                            );
+                            self.metrics.recv_tpu_ok.increment(1);
+                            self.slot_stats.ingest_tpu_ok += 1;
+                            TxDecision::Keep
+                        }
                     }
                     None => {
                         self.metrics.recv_tpu_err.increment(1);
@@ -599,38 +624,55 @@ impl AuctionBatchScheduler {
                     return;
                 }
 
-                // Evict lowest if we're at capacity.
-                if self.unchecked_tx.len() == self.unchecked_capacity {
-                    let id = self.unchecked_tx.pop_min().unwrap();
-                    self.emit_tx_event(
-                        bridge,
-                        id.key,
-                        id.priority,
-                        TransactionAction::Evict {
-                            reason: EvictReason::UncheckedCapacity,
-                        },
-                    );
-                    bridge.drop_transaction(id.key);
-                    self.metrics.recv_packet_evict.increment(1);
-                }
-
-                // Store the new packet.
-                self.unchecked_tx.push(PriorityId {
+                let meta = PriorityId {
                     priority,
                     cost,
                     key,
-                });
-                self.emit_tx_event(
-                    bridge,
-                    key,
-                    priority,
-                    TransactionAction::Ingest {
-                        source: TransactionSource::Jito,
-                        bundle: None,
-                    },
-                );
-                self.metrics.recv_packet_ok.increment(1);
-                self.slot_stats.ingest_custom_ok += 1;
+                };
+
+                if bridge.transaction(key).data.num_address_table_lookups() == 0 {
+                    self.insert_checked_with_capacity(bridge, meta);
+                    self.emit_tx_event(
+                        bridge,
+                        key,
+                        priority,
+                        TransactionAction::Ingest {
+                            source: TransactionSource::Jito,
+                            bundle: None,
+                        },
+                    );
+                    self.metrics.recv_packet_ok.increment(1);
+                    self.slot_stats.ingest_custom_ok += 1;
+                } else {
+                    // Evict lowest if we're at capacity.
+                    if self.unchecked_tx.len() == self.unchecked_capacity {
+                        let id = self.unchecked_tx.pop_min().unwrap();
+                        self.emit_tx_event(
+                            bridge,
+                            id.key,
+                            id.priority,
+                            TransactionAction::Evict {
+                                reason: EvictReason::UncheckedCapacity,
+                            },
+                        );
+                        bridge.drop_transaction(id.key);
+                        self.metrics.recv_packet_evict.increment(1);
+                    }
+
+                    // Store the new packet.
+                    self.unchecked_tx.push(meta);
+                    self.emit_tx_event(
+                        bridge,
+                        key,
+                        priority,
+                        TransactionAction::Ingest {
+                            source: TransactionSource::Jito,
+                            bundle: None,
+                        },
+                    );
+                    self.metrics.recv_packet_ok.increment(1);
+                    self.slot_stats.ingest_custom_ok += 1;
+                }
             }
             None => {
                 self.metrics.recv_packet_err.increment(1);
@@ -730,9 +772,7 @@ impl AuctionBatchScheduler {
         }
 
         // Calculate bundle priority from composite score.
-        let priority = total_score
-            .saturating_mul(PRIORITY_MULTIPLIER)
-            .min(BUNDLE_MARKER - 1);
+        let priority = total_score.min(BUNDLE_MARKER - 1);
 
         // Emit ingest events for bundle transactions.
         let bundle_sig = bridge.transaction(keys[0]).data.signatures()[0];
@@ -841,8 +881,6 @@ impl AuctionBatchScheduler {
                             key: curr.key,
                             meta: curr,
                         });
-                    } else {
-                        self.next_recheck = Some(curr);
                     }
                 }
 
@@ -915,12 +953,18 @@ impl AuctionBatchScheduler {
                             self.try_schedule_bundle(&mut budget, bridge, worker);
                         }
                     }
-                    Ordering::Less => self.try_schedule_bundle(&mut budget, bridge, worker),
+                    Ordering::Less => {
+                        if !self.try_schedule_bundle(&mut budget, bridge, worker) {
+                            self.try_schedule_transaction(&mut budget, bridge, worker);
+                        }
+                    }
                 },
                 (Some(_), None) => {
                     self.try_schedule_transaction(&mut budget, bridge, worker);
                 }
-                (None, Some(_)) => self.try_schedule_bundle(&mut budget, bridge, worker),
+                (None, Some(_)) => {
+                    self.try_schedule_bundle(&mut budget, bridge, worker);
+                }
                 (None, None) => break,
             }
 
@@ -1035,23 +1079,40 @@ impl AuctionBatchScheduler {
 
         // First check. Evict lowest priority if at capacity.
         if self.pending_len() >= self.checked_capacity {
-            let id = self.pop_first_checked(bridge).unwrap();
-            self.emit_tx_event(
-                bridge,
-                id.key,
-                id.priority,
-                TransactionAction::Evict {
-                    reason: EvictReason::CheckedCapacity,
-                },
-            );
-            bridge.drop_transaction(id.key);
+            if let Some(min_checked) = self.checked_tx.first() {
+                if meta.priority <= min_checked.priority {
+                    self.emit_tx_event(
+                        bridge,
+                        meta.key,
+                        meta.priority,
+                        TransactionAction::Evict {
+                            reason: EvictReason::CheckedCapacity,
+                        },
+                    );
+                    bridge.drop_transaction(meta.key);
+                    self.metrics.check_evict.increment(1);
+                    self.slot_stats.check_evict += 1;
+                    return TxDecision::Drop;
+                }
+            }
 
-            self.metrics.check_evict.increment(1);
-            self.slot_stats.check_evict += 1;
+            if let Some(id) = self.pop_first_checked(bridge) {
+                self.emit_tx_event(
+                    bridge,
+                    id.key,
+                    id.priority,
+                    TransactionAction::Evict {
+                        reason: EvictReason::CheckedCapacity,
+                    },
+                );
+                bridge.drop_transaction(id.key);
+
+                self.metrics.check_evict.increment(1);
+                self.slot_stats.check_evict += 1;
+            }
         }
 
-        // Insert the new transaction (yes this may be lower priority than what
-        // we just evicted but that's fine).
+        // Insert the new transaction (now guaranteed to be higher priority than the worst).
         self.insert_checked(bridge, meta);
         self.emit_tx_event(bridge, meta.key, meta.priority, TransactionAction::CheckOk);
 
@@ -1164,34 +1225,39 @@ impl AuctionBatchScheduler {
         bridge: &mut SchedulerBindingsBridge<PriorityId>,
         worker: usize,
     ) -> bool {
-        let mut found_tx = None;
-        for tx in self.checked_tx.iter().rev() {
-            if tx.cost <= *budget && Self::can_lock(&self.auction_engine, bridge, tx.key) {
-                found_tx = Some(*tx);
+        let mut scheduled_txs = Vec::new();
+        let max_batch_size = 32;
+        let search_limit = 65536;
+
+        for tx in self.checked_tx.iter().rev().take(search_limit) {
+            if scheduled_txs.len() >= max_batch_size {
                 break;
             }
+            if tx.cost > *budget {
+                continue;
+            }
+            let tx_locks: Vec<(Pubkey, bool)> = bridge
+                .transaction(tx.key)
+                .locks()
+                .map(|(k, v)| (*k, v))
+                .collect();
+            if self.auction_engine.acquire_locks(tx.key, &tx_locks) {
+                scheduled_txs.push(*tx);
+                *budget -= tx.cost;
+                self.in_flight_cus += tx.cost;
+            }
         }
-        let Some(tx) = found_tx else {
-            return false;
-        };
 
-        // Acquire locks centrally via auction engine.
-        let tx_locks: Vec<(Pubkey, bool)> = bridge
-            .transaction(tx.key)
-            .locks()
-            .map(|(k, v)| (*k, v))
-            .collect();
-        if !self.auction_engine.acquire_locks(tx.key, &tx_locks) {
+        if scheduled_txs.is_empty() {
             return false;
         }
 
-        // Update the auction engine's lock tracker immediately when we lock.
-        // This keeps the tracker up-to-date without scanning the whole map.
-        self.auction_engine.queue_transaction(&tx_locks);
-        self.schedule_batch.push(KeyedTransactionMeta {
-            key: tx.key,
-            meta: tx,
-        });
+        for tx in &scheduled_txs {
+            self.schedule_batch.push(KeyedTransactionMeta {
+                key: tx.key,
+                meta: *tx,
+            });
+        }
 
         // Schedule the batch.
         bridge
@@ -1204,9 +1270,9 @@ impl AuctionBatchScheduler {
             .unwrap();
 
         // Update state.
-        *budget -= tx.cost;
-        self.in_flight_cus += tx.cost;
-        assert!(self.remove_checked(bridge, &tx));
+        for tx in scheduled_txs {
+            assert!(self.remove_checked(bridge, &tx));
+        }
         true
     }
 
@@ -1220,12 +1286,14 @@ impl AuctionBatchScheduler {
         budget: &mut u64,
         bridge: &mut SchedulerBindingsBridge<PriorityId>,
         worker: usize,
-    ) {
-        let bundle = self.bundles.last().unwrap();
+    ) -> bool {
+        let Some(bundle) = self.bundles.last() else {
+            return false;
+        };
 
         // Check this fits in budget.
         if bundle.cost > *budget {
-            return;
+            return false;
         }
 
         // See if the bundle can be scheduled without conflicts.
@@ -1234,7 +1302,7 @@ impl AuctionBatchScheduler {
             .iter()
             .all(|tx_key| Self::can_lock(&self.auction_engine, bridge, *tx_key))
         {
-            return;
+            return false;
         }
 
         // Acquire locks centrally via auction engine for each tx in the bundle.
@@ -1259,9 +1327,8 @@ impl AuctionBatchScheduler {
                         .collect();
                     self.auction_engine.release_locks(*prev_key, &prev_locks);
                 }
-                return;
+                return false;
             }
-            self.auction_engine.queue_transaction(&tx_locks);
         }
 
         self.schedule_batch
@@ -1309,6 +1376,7 @@ impl AuctionBatchScheduler {
             self.auction_engine.dequeue_transaction(&tx_locks);
         }
         self.bundles.pop_last().unwrap();
+        true
     }
 
     /// Checks a TX for lock conflicts without inserting locks.
@@ -1367,6 +1435,48 @@ impl AuctionBatchScheduler {
         let used_cu = total_cu as u64 - progress.remaining_cost_units as u64;
         // Effective remaining = total - used - in_flight (what we've allocated but not yet executed)
         total_cu as u64 - used_cu - self.in_flight_cus
+    }
+
+    fn insert_checked_with_capacity(
+        &mut self,
+        bridge: &mut SchedulerBindingsBridge<PriorityId>,
+        meta: PriorityId,
+    ) -> TxDecision {
+        if self.pending_len() >= self.checked_capacity {
+            if let Some(min_checked) = self.checked_tx.first() {
+                if meta.priority <= min_checked.priority {
+                    self.emit_tx_event(
+                        bridge,
+                        meta.key,
+                        meta.priority,
+                        TransactionAction::Evict {
+                            reason: EvictReason::CheckedCapacity,
+                        },
+                    );
+                    bridge.drop_transaction(meta.key);
+                    self.metrics.check_evict.increment(1);
+                    self.slot_stats.check_evict += 1;
+                    return TxDecision::Drop;
+                }
+            }
+
+            if let Some(id) = self.pop_first_checked(bridge) {
+                self.emit_tx_event(
+                    bridge,
+                    id.key,
+                    id.priority,
+                    TransactionAction::Evict {
+                        reason: EvictReason::CheckedCapacity,
+                    },
+                );
+                bridge.drop_transaction(id.key);
+                self.metrics.check_evict.increment(1);
+                self.slot_stats.check_evict += 1;
+            }
+        }
+
+        self.insert_checked(bridge, meta);
+        TxDecision::Keep
     }
 
     fn insert_checked(&mut self, bridge: &SchedulerBindingsBridge<PriorityId>, meta: PriorityId) {
@@ -1444,7 +1554,7 @@ impl AuctionBatchScheduler {
         let ms_remaining = 400.0 - ms_elapsed;
 
         // 3. Lock Demand: Use the lock manager's internal state (fast, O(1))
-        let lock_demand = self.auction_engine.lock_manager().total_queue_depth();
+        let lock_demand = self.auction_engine.lock_manager().total_contention_depth();
 
         // 4. Space Fragmentation: Ratio of used CU to total
         let space_demand = 1.0 - (remaining_cu as f64 / total_cu as f64);
@@ -1472,7 +1582,8 @@ impl AuctionBatchScheduler {
         tip: u64,
     ) -> Option<(u64, u64)> {
         let base_cu = costs.total_cost;
-        let priority_fee = costs.prioritization_fee;
+        let priority_fee_lamports = costs.prioritization_fee as f64;
+        let tip_lamports = tip as f64;
 
         // 1. Compute serialization penalty from centralized lock manager
         let all_locks: Vec<(Pubkey, bool)> = locks.collect();
@@ -1495,19 +1606,24 @@ impl AuctionBatchScheduler {
         // 3. Compute flexibility discount from centralized entropy
         let flexibility_discount = self.auction_engine.flexibility_coeff() * 0.3;
 
-        // 4. Surplus calculation
-        // We want: fee + tip - (cost * (1 - discount)) > threshold
-        let surplus = (priority_fee + tip) as f64 - resource_cost * (1.0 - flexibility_discount);
-        
-        // Push negative surplus transactions down the queue instead of rejecting them.
-        // We achieve this by letting the scaled priority clamp to 0.
+        // 4. Surplus calculation (all values in lamports)
+        // Reward includes base signature fee (5,000 lamports) + priority fee + tip
+        let base_fee = 5_000.0;
+        let reward = base_fee + priority_fee_lamports + tip_lamports;
+        let surplus = reward - resource_cost * (1.0 - flexibility_discount);
 
-        // 5. Scale to priority (safely clamp to prevent float-to-int cast overflow)
-        let scaled_surplus = (surplus * PRIORITY_MULTIPLIER as f64 + 1000.0).max(0.0);
-        let priority = if scaled_surplus >= (BUNDLE_MARKER - 1) as f64 {
-            BUNDLE_MARKER - 1
+        let priority = if surplus < 0.0 {
+            0
         } else {
-            scaled_surplus as u64
+            // 5. Scale raw surplus by CU efficiency to derive priority.
+            let scaled_surplus = (surplus * PRIORITY_MULTIPLIER as f64) / costs.total_cost as f64;
+            let scaled_surplus = scaled_surplus.max(0.0);
+
+            if scaled_surplus >= (BUNDLE_MARKER - 1) as f64 {
+                BUNDLE_MARKER - 1
+            } else {
+                scaled_surplus as u64
+            }
         };
 
         Some((priority, costs.total_cost))
@@ -1668,8 +1784,9 @@ struct BundleId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agave_scheduler_bindings::{NOT_LEADER, ProgressMessage, pack_message_flags};
-    use agave_scheduling_utils::bridge::TestBridge;
+    use agave_scheduler_bindings::worker_message_types::not_included_reasons;
+    use agave_scheduler_bindings::{LEADER_READY, NOT_LEADER, ProgressMessage, pack_message_flags};
+    use agave_scheduling_utils::bridge::{ScheduleBatch, TestBridge};
     use solana_compute_budget_interface::ComputeBudgetInstruction;
     use solana_hash::Hash;
     use solana_keypair::{Keypair, Signer};
@@ -1736,6 +1853,38 @@ mod tests {
         .into()
     }
 
+    fn noop_with_lookup_table(
+        payer: &Keypair,
+        cu_limit: u32,
+        cu_price: u64,
+    ) -> VersionedTransaction {
+        use solana_message::{AddressLookupTableAccount, VersionedMessage, v0};
+        let lookup_key = Pubkey::new_unique();
+        let to_key = Pubkey::new_unique();
+        let ix = Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![AccountMeta::new(to_key, false)],
+            data: vec![],
+        };
+        let message = VersionedMessage::V0(
+            v0::Message::try_compile(
+                &payer.pubkey(),
+                &[
+                    ComputeBudgetInstruction::set_compute_unit_limit(cu_limit),
+                    ComputeBudgetInstruction::set_compute_unit_price(cu_price),
+                    ix,
+                ],
+                &[AddressLookupTableAccount {
+                    key: lookup_key,
+                    addresses: vec![to_key],
+                }],
+                Hash::new_from_array([1; 32]),
+            )
+            .unwrap(),
+        );
+        VersionedTransaction::try_new(message, &[payer]).unwrap()
+    }
+
     fn mock_tx_with_locks(
         payer: &Keypair,
         cu_limit: u32,
@@ -1776,7 +1925,7 @@ mod tests {
         let mut bridge = TestBridge::new(5, 4);
 
         let payer = Keypair::new();
-        let tx = noop_with_budget(&payer, 25_000, 1000);
+        let tx = noop_with_lookup_table(&payer, 25_000, 1000);
         bridge.queue_tpu(&tx);
 
         bridge.queue_progress(MOCK_PROGRESS);
@@ -1793,7 +1942,7 @@ mod tests {
         let mut bridge = TestBridge::new(5, 4);
 
         let payer = Keypair::new();
-        let tx = noop_with_budget(&payer, 25_000, 100_000); // Higher price to clear min_surplus
+        let tx = noop_with_lookup_table(&payer, 25_000, 100_000); // Higher price to clear min_surplus
         bridge.queue_tpu(&tx);
 
         bridge.queue_progress(MOCK_PROGRESS);
@@ -1853,10 +2002,8 @@ mod tests {
         let low_hot_score = scheduler.score_with_auction(&costs, locks, 0);
         assert!(
             low_hot_score.is_some(),
-            "Low paying hot transaction should be accepted but prioritized at 0 due to congestion penalty"
+            "Low paying hot transaction should be accepted"
         );
-        let (priority, _) = low_hot_score.unwrap();
-        assert_eq!(priority, 0);
 
         // 3. Try to ingest a high-paying transaction targeting the hot account (should be accepted)
         let payer_high_hot = Keypair::new();
@@ -1898,6 +2045,23 @@ mod tests {
         assert!(
             low_cold_score.is_some(),
             "Low paying cold transaction should be accepted because there is no serialization penalty"
+        );
+
+        let (low_hot_priority, _) = low_hot_score.unwrap();
+        let (high_hot_priority, _) = high_hot_score.unwrap();
+        let (low_cold_priority, _) = low_cold_score.unwrap();
+
+        assert!(
+            high_hot_priority > low_hot_priority,
+            "High paying hot priority ({}) should exceed low paying hot priority ({})",
+            high_hot_priority,
+            low_hot_priority
+        );
+        assert!(
+            low_cold_priority > low_hot_priority,
+            "Low paying cold priority ({}) should exceed low paying hot priority ({}) due to serialization penalty",
+            low_cold_priority,
+            low_hot_priority
         );
     }
 
@@ -1961,10 +2125,16 @@ mod tests {
         let score_late = scheduler.score_with_auction(&costs_late, locks_late, 0);
         assert!(
             score_late.is_some(),
-            "Transaction should be accepted late in the slot but prioritized at 0 due to high time penalty"
+            "Transaction should be accepted late in the slot"
         );
-        let (priority, _) = score_late.unwrap();
-        assert_eq!(priority, 0);
+        let (priority_late, _) = score_late.unwrap();
+        let (priority_early, _) = score_early.unwrap();
+        assert!(
+            priority_late < priority_early,
+            "Late priority ({}) should be less than early priority ({}) due to time penalty decay",
+            priority_late,
+            priority_early
+        );
     }
 
     #[test]
@@ -1991,10 +2161,14 @@ mod tests {
         assert_eq!(
             scheduler.bundles.len(),
             1,
-            "Low paying bundle should be accepted on ingestion but prioritized at 0"
+            "Low paying bundle should be accepted on ingestion"
         );
         let low_bundle = scheduler.bundles.iter().next().unwrap();
-        assert_eq!(low_bundle.priority, 0);
+        assert!(
+            low_bundle.priority > 0,
+            "Low paying bundle priority ({}) should be positive",
+            low_bundle.priority
+        );
 
         // 2. Queue a high-paying bundle (accepted and stored)
         let tx_high1 = noop_with_budget(&payer1, 25_000, 5000);
@@ -2013,11 +2187,133 @@ mod tests {
             2,
             "Both bundles should be successfully ingested"
         );
-        
+
         let mut bundle_iter = scheduler.bundles.iter();
         let first = bundle_iter.next().unwrap();
-        assert_eq!(first.priority, 0);
         let second = bundle_iter.next().unwrap();
-        assert!(second.priority > 0, "High paying bundle should have positive priority");
+        assert!(
+            second.priority > first.priority,
+            "High paying bundle ({}) should have higher priority than low paying bundle ({})",
+            second.priority,
+            first.priority
+        );
+    }
+
+    type SetupExecuting = (
+        AuctionBatchScheduler,
+        TestBridge<PriorityId>,
+        crossbeam_channel::Sender<JitoUpdate>,
+        ScheduleBatch<Vec<KeyedTransactionMeta<PriorityId>>>,
+    );
+
+    fn setup_executing_tx(cu_limit: u32, cu_price: u64) -> SetupExecuting {
+        let (mut scheduler, jito_tx) = test_scheduler();
+        let mut bridge = TestBridge::new(5, 4);
+
+        // Ingest a TX.
+        let payer = Keypair::new();
+        let tx = noop_with_budget(&payer, cu_limit, cu_price);
+        bridge.queue_tpu(&tx);
+
+        // Poll - ingest & schedule checks.
+        bridge.queue_progress(MOCK_PROGRESS);
+        scheduler.poll(&mut bridge);
+
+        // Complete checks.
+        bridge.queue_all_checks_ok();
+        bridge.queue_progress(MOCK_PROGRESS);
+        scheduler.poll(&mut bridge);
+        assert_eq!(scheduler.checked_tx.len(), 1);
+
+        // Provide tip config before becoming leader.
+        jito_tx
+            .send(JitoUpdate::TipConfig(TipConfig {
+                tip_receiver: Pubkey::new_unique(),
+                block_builder: Pubkey::new_unique(),
+            }))
+            .unwrap();
+        bridge.queue_progress(MOCK_PROGRESS);
+        scheduler.poll(&mut bridge);
+
+        // Transition to leader.
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
+        scheduler.poll(&mut bridge);
+
+        // Skip past the become-tip-receiver batches (2x EXECUTE|DROP_ON_FAILURE).
+        let tip0 = bridge.pop_schedule().unwrap();
+        assert_ne!(tip0.flags & pack_message_flags::EXECUTE, 0);
+        let tip1 = bridge.pop_schedule().unwrap();
+        assert_ne!(tip1.flags & pack_message_flags::EXECUTE, 0);
+
+        // Pop the user TX execute batch.
+        let exec_batch = bridge.pop_schedule().unwrap();
+        assert_eq!(exec_batch.flags, pack_message_flags::EXECUTE);
+        assert_eq!(exec_batch.transactions.len(), 1);
+        assert_eq!(scheduler.checked_tx.len(), 0);
+        assert!(
+            scheduler
+                .executing_tx
+                .contains(&exec_batch.transactions[0].key)
+        );
+
+        (scheduler, bridge, jito_tx, exec_batch)
+    }
+
+    #[test]
+    fn test_deferred_tx_drained_on_slot_roll() {
+        let (mut scheduler, mut bridge, _jito_tx, exec_batch) = setup_executing_tx(25_000, 100);
+        let tx_key = exec_batch.transactions[0].key;
+
+        // Queue a retryable error that defers the TX.
+        bridge.queue_execute_response(
+            &exec_batch,
+            0,
+            bridge.execute_err(not_included_reasons::WOULD_EXCEED_MAX_BLOCK_COST_LIMIT),
+        );
+
+        // Poll to drain the response - TX moves to deferred.
+        bridge.queue_progress(ProgressMessage {
+            leader_state: LEADER_READY,
+            ..MOCK_PROGRESS
+        });
+        scheduler.poll(&mut bridge);
+        assert!(scheduler.deferred_tx.iter().any(|id| id.key == tx_key));
+
+        // Roll to the next slot.
+        bridge.queue_progress(ProgressMessage {
+            current_slot: MOCK_PROGRESS.current_slot + 1,
+            ..MOCK_PROGRESS
+        });
+        scheduler.poll(&mut bridge);
+
+        // Deferred TX drained back to checked.
+        assert_eq!(scheduler.deferred_tx.len(), 0);
+        assert!(scheduler.checked_tx.iter().any(|id| id.key == tx_key));
+        assert!(bridge.contains_tx(tx_key));
+    }
+
+    #[test]
+    fn test_unchecked_tpu_eviction_exceeds_capacity() {
+        let (mut scheduler, _jito_tx) = test_scheduler();
+        scheduler.unchecked_capacity = 2;
+
+        let mut bridge = TestBridge::new(5, 4);
+
+        // Queue 5 transactions.
+        for _ in 0..5 {
+            let payer = Keypair::new();
+            let tx = noop_with_lookup_table(&payer, 25_000, 1000);
+            bridge.queue_tpu(&tx);
+        }
+
+        // Poll to ingest. shortfall = (0 + 5) - 2 = 3.
+        // Previously this would have panicked. Now it must run cleanly.
+        bridge.queue_progress(MOCK_PROGRESS);
+        scheduler.poll(&mut bridge);
+
+        assert!(scheduler.unchecked_tx.len() <= 2);
     }
 }

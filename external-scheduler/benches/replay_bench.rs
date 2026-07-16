@@ -282,7 +282,7 @@ fn assign_ticks_real(window: &LeaderWindow) -> (usize, Vec<Vec<usize>>) {
 
     // 1 tick = 6.25 ms (6,250,000 ns)
     let tick_ns: u128 = 6_250_000;
-    
+
     // Total ticks spanning this window's duration (at least 1)
     let total_ticks = ((window_dur / tick_ns) as usize).max(1);
     let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); total_ticks];
@@ -309,15 +309,14 @@ fn extract_fee_lamports(tx: &VersionedTransaction) -> u64 {
     if tx.signatures.is_empty() {
         return 5_000;
     }
-    
+
     let sig = tx.signatures[0].as_ref();
     let val = u32::from_le_bytes(sig[0..4].try_into().unwrap());
-    
+
     5_000 + (val % 100_000) as u64
 }
 
-fn make_batch_scheduler(
-) -> (BatchScheduler, crossbeam_channel::Sender<JitoUpdate>) {
+fn make_batch_scheduler() -> (BatchScheduler, crossbeam_channel::Sender<JitoUpdate>) {
     let (jito_tx, jito_rx) = crossbeam_channel::bounded(1024);
     jito_tx
         .send(JitoUpdate::BuilderConfig(BuilderConfig {
@@ -358,8 +357,7 @@ fn make_batch_scheduler(
     (scheduler, jito_tx)
 }
 
-fn make_auction_scheduler(
-) -> (AuctionBatchScheduler, crossbeam_channel::Sender<JitoUpdate>) {
+fn make_auction_scheduler() -> (AuctionBatchScheduler, crossbeam_channel::Sender<JitoUpdate>) {
     let (jito_tx, jito_rx) = crossbeam_channel::bounded(1024);
     jito_tx
         .send(JitoUpdate::BuilderConfig(BuilderConfig {
@@ -501,12 +499,12 @@ fn replay_window<S: SchedulerExt>(
         progress.leader_range_end = current_slot + 1;
         progress.current_slot_progress = ((slot_tick * 100) / TICKS_PER_SLOT) as u8;
         progress.remaining_cost_units = slot_remaining_cus;
-        
+
         // Simulating continuous leader slots:
         progress.leader_state = LEADER_READY;
 
         bridge.queue_progress(progress);
-        
+
         // Important: sync the queues to make the TPU / progress visible to the scheduler
         bridge.sync_producer_queues();
 
@@ -517,7 +515,7 @@ fn replay_window<S: SchedulerExt>(
             if loop_count > 10 {
                 break;
             }
-            
+
             let mut scheduled_any = false;
 
             while let Some(batch) = bridge.pop_schedule() {
@@ -534,7 +532,7 @@ fn replay_window<S: SchedulerExt>(
                         let tx = &batch.transactions[i];
                         bridge.queue_execute_response(&batch, i, bridge.execute_ok());
                         total_packed += 1;
-                        
+
                         let tx_data = bridge.transaction(tx.key);
                         let sig_str = tx_data.data.signatures()[0].to_string();
                         packed_signatures.insert(sig_str.clone());
@@ -542,7 +540,7 @@ fn replay_window<S: SchedulerExt>(
                     }
                 }
             }
-            
+
             // Sync queues and poll once per outer loop iteration to drain responses
             // and avoid queue overflows when scheduling txs
             bridge.sync_producer_queues();
@@ -590,15 +588,15 @@ fn segment_window_into_slots(window: &LeaderWindow) -> Vec<LeaderWindow> {
     // 400 ms = 400,000,000 ns
     let slot_ns: u128 = 400_000_000;
     let base_ts = window.entries[0].timestamp_ns;
-    
+
     let mut slots = Vec::new();
     let mut current_bucket = Vec::new();
     let mut current_slot_idx = 0;
-    
+
     for entry in &window.entries {
         let offset = entry.timestamp_ns - base_ts;
         let slot_idx = (offset / slot_ns) as usize;
-        
+
         if slot_idx != current_slot_idx {
             if !current_bucket.is_empty() {
                 slots.push(LeaderWindow {
@@ -667,7 +665,6 @@ fn replay_all<S: SchedulerExt, T>(
 // ---------------------------------------------------------------------------
 
 fn main() {
-
     // Resolve log path.
     // CARGO_MANIFEST_DIR points to external-scheduler/; the log lives one level up at
     // the workspace root: <workspace>/etc/tx_io.log.
@@ -695,8 +692,14 @@ fn main() {
     let (mut entries, dropped_on_receive, mut mainnet_processed) = parse_log(&log_path);
 
     println!("  → {} tx_in_signature entries parsed", entries.len());
-    println!("  → {} transactions pre-filtered (DropOnReceive)", dropped_on_receive.len());
-    println!("  → {} transactions processed on mainnet (verification set)", mainnet_processed.len());
+    println!(
+        "  → {} transactions pre-filtered (DropOnReceive)",
+        dropped_on_receive.len()
+    );
+    println!(
+        "  → {} transactions processed on mainnet (verification set)",
+        mainnet_processed.len()
+    );
 
     if entries.is_empty() {
         eprintln!("No transactions found in log. Aborting.");
@@ -712,14 +715,14 @@ fn main() {
             break;
         }
     }
-    
+
     let mut new_entries = Vec::new();
     let base_ts = template_entry.timestamp_ns + 100_000_000; // Offset them slightly so they land in a slot
-    
+
     for i in 0..3_000 {
         let mut synth_entry = template_entry.clone();
         synth_entry.timestamp_ns = base_ts + (i as u128 * 1_000); // Tightly packed arrival times
-        
+
         // Modify the first 4 bytes of the signature directly in the serialized bytes!
         // Solana's bincode `short_vec` encoding uses 1 byte for `len=1`, so signature starts at index 1.
         if synth_entry.tx_bytes.len() > 5 && synth_entry.tx_bytes[0] == 1 {
@@ -729,15 +732,15 @@ fn main() {
             synth_entry.tx_bytes[3] = i_bytes[2];
             synth_entry.tx_bytes[4] = i_bytes[3];
         }
-        
+
         // Assign a mock signature string for the benchmark's fee lookup and packing sets
         synth_entry.signature = format!("synth_{}", i);
-        
+
         // Add to mainnet_processed so we properly track them in our metrics!
         mainnet_processed.insert(synth_entry.signature.clone());
         new_entries.push(synth_entry);
     }
-    
+
     entries.extend(new_entries);
     entries.sort_by_key(|e| e.timestamp_ns);
 
@@ -761,12 +764,16 @@ fn main() {
 
     // 3. Replay through BatchScheduler
     println!("Replaying through BatchScheduler...");
-    let batch_report = replay_all(&windows, &dropped_on_receive, &mainnet_processed, || make_batch_scheduler());
+    let batch_report = replay_all(&windows, &dropped_on_receive, &mainnet_processed, || {
+        make_batch_scheduler()
+    });
     println!("  ✓ done");
 
     // 4. Replay through AuctionBatchScheduler
     println!("Replaying through AuctionBatchScheduler...");
-    let auction_report = replay_all(&windows, &dropped_on_receive, &mainnet_processed, || make_auction_scheduler());
+    let auction_report = replay_all(&windows, &dropped_on_receive, &mainnet_processed, || {
+        make_auction_scheduler()
+    });
     println!("  ✓ done");
     println!();
 
@@ -788,12 +795,15 @@ fn main() {
     };
 
     let batch_inclusion_rate = if batch_report.total_mainnet_processed > 0 {
-        (batch_report.packed_mainnet_processed as f64 / batch_report.total_mainnet_processed as f64) * 100.0
+        (batch_report.packed_mainnet_processed as f64 / batch_report.total_mainnet_processed as f64)
+            * 100.0
     } else {
         0.0
     };
     let auction_inclusion_rate = if auction_report.total_mainnet_processed > 0 {
-        (auction_report.packed_mainnet_processed as f64 / auction_report.total_mainnet_processed as f64) * 100.0
+        (auction_report.packed_mainnet_processed as f64
+            / auction_report.total_mainnet_processed as f64)
+            * 100.0
     } else {
         0.0
     };
@@ -801,14 +811,8 @@ fn main() {
     println!("══════════════════════════════════════════════════════════════");
     println!("              MAINNET-REPLAY BENCHMARK REPORT               ");
     println!("══════════════════════════════════════════════════════════════");
-    println!(
-        "Leader windows replayed:   {}",
-        batch_report.total_windows
-    );
-    println!(
-        "Total transactions fed:    {}",
-        batch_report.total_tx_in,
-    );
+    println!("Leader windows replayed:   {}", batch_report.total_windows);
+    println!("Total transactions fed:    {}", batch_report.total_tx_in,);
     println!();
     println!(
         "{:<28} {:<20} {:<20}",
@@ -817,15 +821,11 @@ fn main() {
     println!("{}", "-".repeat(68));
     println!(
         "{:<28} {:<20} {:<20}",
-        "Total Packed Tx",
-        batch_report.total_packed,
-        auction_report.total_packed,
+        "Total Packed Tx", batch_report.total_packed, auction_report.total_packed,
     );
     println!(
         "{:<28} {:<20} {:<20}",
-        "Total Dropped Tx",
-        batch_report.total_dropped,
-        auction_report.total_dropped,
+        "Total Dropped Tx", batch_report.total_dropped, auction_report.total_dropped,
     );
     println!(
         "{:<28} {:<20} {:<20}",
@@ -835,28 +835,33 @@ fn main() {
     );
     println!(
         "{:<28} {:<20} {:<20}",
-        "Batches Scheduled",
-        batch_report.total_batches,
-        auction_report.total_batches,
+        "Batches Scheduled", batch_report.total_batches, auction_report.total_batches,
     );
     println!(
         "{:<28} {:<20.2} {:<20.2}",
-        "Avg Batch Size",
-        batch_report.avg_batch_size,
-        auction_report.avg_batch_size,
+        "Avg Batch Size", batch_report.avg_batch_size, auction_report.avg_batch_size,
     );
     println!(
         "{:<28} {:<20} {:<20}",
         "Mainnet Processed Packed",
-        format!("{} / {} ({:.1}%)", batch_report.packed_mainnet_processed, batch_report.total_mainnet_processed, batch_inclusion_rate),
-        format!("{} / {} ({:.1}%)", auction_report.packed_mainnet_processed, auction_report.total_mainnet_processed, auction_inclusion_rate),
+        format!(
+            "{} / {} ({:.1}%)",
+            batch_report.packed_mainnet_processed,
+            batch_report.total_mainnet_processed,
+            batch_inclusion_rate
+        ),
+        format!(
+            "{} / {} ({:.1}%)",
+            auction_report.packed_mainnet_processed,
+            auction_report.total_mainnet_processed,
+            auction_inclusion_rate
+        ),
     );
     println!("{}", "-".repeat(68));
     println!(
         "Packed improvement:         {:+.1}% (~{:.2}x)",
         packed_delta,
-        auction_report.total_packed as f64
-            / batch_report.total_packed.max(1) as f64,
+        auction_report.total_packed as f64 / batch_report.total_packed.max(1) as f64,
     );
     println!(
         "Revenue improvement:        {:+.1}% (~{:.2}x)",
@@ -911,8 +916,7 @@ fn main() {
         batch_packed = batch_report.total_packed,
         auction_packed = auction_report.total_packed,
         packed_pct = packed_delta,
-        packed_x = auction_report.total_packed as f64
-            / batch_report.total_packed.max(1) as f64,
+        packed_x = auction_report.total_packed as f64 / batch_report.total_packed.max(1) as f64,
         batch_dropped = batch_report.total_dropped,
         auction_dropped = auction_report.total_dropped,
         batch_rev = batch_report.total_revenue_lamports,
